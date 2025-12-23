@@ -179,6 +179,10 @@ Each program line:
 - No FOR/NEXT loops (use GOTO)
 - No subroutines/GOSUB
 
+### LLM-generated code
+
+To the extent that there is LLM-generated code in this repo, it should be space indented. Any space indented code should be carefully audited and then converted to tabs (eventually). 
+
 ## License
 
 The contents of this repo are released under the [Lone Dynamics Open License](LICENSE.md).
