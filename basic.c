@@ -2,7 +2,6 @@
  * Machdyne BASIC
  * Copyright (c) 2025 Lone Dynamics Corporation. All rights reserved.
  *
- * Refactored to support both command mode and INPUT statement mode
  */
 
 #include <stdio.h>
