@@ -3,6 +3,7 @@
 #include "ch32fun/ch32fun/ch32fun.h"
 #include <stdio.h>
 #include <stdint.h>
+#include "ls10.h"
 
 #define RX_BUF_LEN 16 // size of receive circular buffer
 //#define RX_BUF_LEN 64 // size of receive circular buffer
@@ -15,6 +16,7 @@ void basic_yield(uint8_t *line);
 int main()
 {
 	SystemInit();
+	funGpioInitAll();
 
 	Delay_Ms(150);
 	printf("///\r\n");
@@ -121,6 +123,54 @@ int atoi(const char *str) {
     }
 
     return sign * result;
+}
+
+uint8_t hw_peek(uint8_t addr) {
+	return 0; 
+}
+
+void hw_poke(uint8_t addr, uint8_t data) {
+
+   if (addr == 0x10) {
+
+      printf(" SET GPIO DIR %2x = %2x\r\n", addr, data);
+
+      if ((data & 0x80) == 0x80)
+         (ZW_GPIOH_PORT)->CFGLR |= (GPIO_Speed_10MHz | GPIO_CNF_OUT_PP)<<(4*ZW_GPIOH);
+      else
+         (ZW_GPIOH_PORT)->CFGLR |= (GPIO_Speed_10MHz | GPIO_CNF_IN_FLOATING)<<(4*ZW_GPIOH);
+
+      if ((data & 0x02) == 0x02)
+         (ZW_GPIOB_PORT)->CFGLR |= (GPIO_Speed_10MHz | GPIO_CNF_OUT_PP)<<(4*ZW_GPIOB);
+      else
+         (ZW_GPIOB_PORT)->CFGLR |= (GPIO_Speed_10MHz | GPIO_CNF_IN_FLOATING)<<(4*ZW_GPIOB);
+
+      if ((data & 0x01) == 0x01)
+         (ZW_GPIOA_PORT)->CFGLR |= (GPIO_Speed_10MHz | GPIO_CNF_OUT_PP)<<(4*ZW_GPIOA);
+      else
+         (ZW_GPIOA_PORT)->CFGLR |= (GPIO_Speed_10MHz | GPIO_CNF_IN_FLOATING)<<(4*ZW_GPIOA);
+
+  } if (addr == 0x11) {
+
+      printf(" SET GPIO %2x = %2x\r\n", addr, data);
+
+      if ((data & 0x80) == 0x80)
+         (ZW_GPIOH_PORT)->BSHR = (1 << ZW_GPIOH);
+      else
+         (ZW_GPIOH_PORT)->BSHR = (1 << (16 + ZW_GPIOH));
+
+      if ((data & 0x02) == 0x02)
+         (ZW_GPIOB_PORT)->BSHR = (1 << ZW_GPIOB);
+      else
+         (ZW_GPIOB_PORT)->BSHR = (1 << (16 + ZW_GPIOB));
+
+      if ((data & 0x01) == 0x01)
+         (ZW_GPIOA_PORT)->BSHR = (1 << ZW_GPIOA);
+      else
+         (ZW_GPIOA_PORT)->BSHR = (1 << (16 + ZW_GPIOA));
+
+	}
+
 }
 
 int isalpha(int c) {

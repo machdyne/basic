@@ -20,6 +20,9 @@ int toupper(int c);
 #define MAX_LINE 64
 #define NUM_VARS 26
 
+uint8_t hw_peek(uint8_t addr);
+void hw_poke(uint8_t addr, uint8_t val);
+
 enum {
     TOK_EOL = 0,
     TOK_LET,
@@ -54,7 +57,6 @@ enum {
 static uint8_t program[MAX_PROG];
 static uint16_t prog_len;
 static int16_t vars[NUM_VARS];
-static uint8_t memory[256];  /* Memory for PEEK/POKE */
 
 /* Input routing state */
 typedef enum {
@@ -212,7 +214,7 @@ static int16_t factor(uint8_t **pc) {
         if (**pc == TOK_LPAREN) (*pc)++;
         int16_t addr = expr(pc);
         if (**pc == TOK_RPAREN) (*pc)++;
-        v = memory[addr & 0xFF];
+        v = hw_peek(addr & 0xff);
     }
     else if (**pc == TOK_LPAREN) {
         (*pc)++;
@@ -378,7 +380,7 @@ static void run_from(uint8_t *start_pc) {
                 int16_t addr = expr(&ip);
                 if (*ip == TOK_COMMA) ip++;
                 int16_t val = expr(&ip);
-                memory[addr & 0xFF] = val & 0xFF;
+                hw_poke(addr & 0xff, val & 0xff);
                 break;
             }
             
@@ -627,6 +629,14 @@ void basic_yield(uint8_t *line) {
 /* ================= MAIN (Linux only) ================= */
 
 #ifdef TARGET_LINUX
+
+uint8_t hw_peek(uint8_t addr) {
+	return 0;
+}
+
+void hw_poke(uint8_t addr, uint8_t val) {
+	printf(" POKE 0x%x <- 0x%x\r\n", addr, val);
+};
 
 int main(void) {
     char line[MAX_LINE];

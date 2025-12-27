@@ -82,12 +82,12 @@ Jump to a line number:
 50 PRINT "DONE"
 ```
 
-#### PEEK/POKE (not yet implemented)
-Direct memory access:
+#### PEEK/POKE (partially implemented)
+Turn an LED on or off:
 ```basic
-10 POKE 100, 42
-20 LET A = PEEK(100)
-30 PRINT A
+10 POKE 16, 128
+20 INPUT "LED 0 or 1:", L
+30 IF L == 1 THEN POKE(17, 128) ELSE POKE(17, 0)
 ```
 
 ### Operators
