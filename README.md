@@ -21,13 +21,14 @@ Linux and [Zwölf LS10A](https://github.com/machdyne/zwolf).
 ### For LS10
 ```bash
 $ cd targets/ls10
+$ git clone https://github.com/cnlohr/ch32fun
 $ make
 ```
 
 ### For Linux
 ```bash
-make
-./basic
+$ make
+$ ./basic
 ```
 
 ## BASIC Language Reference

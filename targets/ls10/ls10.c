@@ -5,8 +5,8 @@
 #include <stdint.h>
 #include "ls10.h"
 
-#define RX_BUF_LEN 16 // size of receive circular buffer
-//#define RX_BUF_LEN 64 // size of receive circular buffer
+//#define RX_BUF_LEN 16 // size of receive circular buffer
+#define RX_BUF_LEN 128 // size of receive circular buffer
 
 uint8_t rx_buf[RX_BUF_LEN] = {0}; // DMA receive buffer for incoming data
 uint8_t cmd_buf[RX_BUF_LEN] = {0}; // buffer for complete command strings
