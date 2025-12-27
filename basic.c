@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #ifdef TARGET_LINUX
 #include <ctype.h>
+#include <unistd.h>
 #else
 int isalpha(int c);
 int isdigit(int c);
@@ -23,6 +24,7 @@ int toupper(int c);
 
 void print(uint8_t len, uint8_t *str);
 
+void hw_sleep(uint16_t secs);
 uint8_t hw_peek(uint8_t addr);
 void hw_poke(uint8_t addr, uint8_t val);
 
@@ -52,6 +54,7 @@ enum {
     TOK_INPUT,
     TOK_PEEK,
     TOK_POKE,
+    TOK_SLEEP,
     TOK_LPAREN,
     TOK_RPAREN,
     TOK_COMMA
@@ -128,6 +131,9 @@ static int tokenize(char *src, uint8_t *out) {
                 src += 5;
             } else if (!strncmp(src, "INPUT", 5)) {
                 p = emit(p, TOK_INPUT);
+                src += 5;
+            } else if (!strncmp(src, "SLEEP", 5)) {
+                p = emit(p, TOK_SLEEP);
                 src += 5;
             } else if (!strncmp(src, "THEN", 4)) {
                 p = emit(p, TOK_THEN);
@@ -369,6 +375,14 @@ static int execute_statement(uint8_t **ip, uint8_t **pc) {
             break;
         }
             
+        case TOK_SLEEP: {
+            int16_t seconds = expr(ip);
+            if (seconds > 0) {
+                hw_sleep(seconds);
+            }
+            break;
+        }
+            
         case TOK_PRINT:
             if (*(*ip) == TOK_STR) {
                 (*ip)++;
@@ -544,6 +558,7 @@ static void print_token(uint8_t **ip) {
         case TOK_ELSE:  printf("ELSE "); break;
         case TOK_PEEK:  printf("PEEK"); break;
         case TOK_POKE:  printf("POKE "); break;
+        case TOK_SLEEP: printf("SLEEP "); break;
 
         case TOK_VAR:
             printf("%c", 'A' + *(*ip)++);
@@ -644,6 +659,10 @@ void basic_yield(uint8_t *line) {
 /* ================= MAIN (Linux only) ================= */
 
 #ifdef TARGET_LINUX
+
+void hw_sleep(uint16_t secs) {
+   sleep(secs);
+}
 
 uint8_t hw_peek(uint8_t addr) {
 	return 0;

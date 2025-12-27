@@ -125,6 +125,10 @@ int atoi(const char *str) {
     return sign * result;
 }
 
+void hw_sleep(uint16_t secs) {
+	Delay_Ms(secs * 1000);
+}
+
 uint8_t hw_peek(uint8_t addr) {
 	return 0; 
 }
