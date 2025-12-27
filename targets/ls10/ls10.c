@@ -139,20 +139,30 @@ void hw_poke(uint8_t addr, uint8_t data) {
 
       printf(" SET GPIO DIR %2x = %2x\r\n", addr, data);
 
-      if ((data & 0x80) == 0x80)
+      if ((data & 0x80) == 0x80) {
+			(ZW_GPIOH_PORT)->CFGLR &= ~(0xf<<(4*ZW_GPIOH));
          (ZW_GPIOH_PORT)->CFGLR |= (GPIO_Speed_10MHz | GPIO_CNF_OUT_PP)<<(4*ZW_GPIOH);
-      else
+      } else {
+			(ZW_GPIOH_PORT)->CFGLR &= ~(0xf<<(4*ZW_GPIOH));
          (ZW_GPIOH_PORT)->CFGLR |= (GPIO_Speed_10MHz | GPIO_CNF_IN_FLOATING)<<(4*ZW_GPIOH);
+		}
 
-      if ((data & 0x02) == 0x02)
+      if ((data & 0x02) == 0x02) {
+			(ZW_GPIOB_PORT)->CFGLR &= ~(0xf<<(4*ZW_GPIOB));
          (ZW_GPIOB_PORT)->CFGLR |= (GPIO_Speed_10MHz | GPIO_CNF_OUT_PP)<<(4*ZW_GPIOB);
-      else
+      } else {
+			(ZW_GPIOB_PORT)->CFGLR &= ~(0xf<<(4*ZW_GPIOB));
          (ZW_GPIOB_PORT)->CFGLR |= (GPIO_Speed_10MHz | GPIO_CNF_IN_FLOATING)<<(4*ZW_GPIOB);
 
-      if ((data & 0x01) == 0x01)
+		}
+
+      if ((data & 0x01) == 0x01) {
+			(ZW_GPIOA_PORT)->CFGLR &= ~(0xf<<(4*ZW_GPIOA));
          (ZW_GPIOA_PORT)->CFGLR |= (GPIO_Speed_10MHz | GPIO_CNF_OUT_PP)<<(4*ZW_GPIOA);
-      else
+      } else {
+			(ZW_GPIOA_PORT)->CFGLR &= ~(0xf<<(4*ZW_GPIOA));
          (ZW_GPIOA_PORT)->CFGLR |= (GPIO_Speed_10MHz | GPIO_CNF_IN_FLOATING)<<(4*ZW_GPIOA);
+		}
 
   } if (addr == 0x11) {
 
