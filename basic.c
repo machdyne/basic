@@ -343,63 +343,100 @@ static void request_input(void) {
 #endif
 }
 
+/* ================= CONSOLIDATED STATEMENT EXECUTION ================= */
+
+// Return values:
+//   1: Continue normally
+//   0: PC was changed (GOTO), don't advance
+//  -1: Stop execution (END or INPUT waiting)
+static int execute_statement(uint8_t **ip, uint8_t **pc) {
+    uint8_t tok = *(*ip)++;
+    
+    switch (tok) {
+        case TOK_LET:
+            if (*(*ip)++ == TOK_VAR) {
+                uint8_t v = *(*ip)++;
+                if (*(*ip) == TOK_EQ) (*ip)++;
+                vars[v] = expr(ip);
+            }
+            break;
+            
+        case TOK_POKE: {
+            int16_t addr = expr(ip);
+            if (*(*ip) == TOK_COMMA) (*ip)++;
+            int16_t val = expr(ip);
+            hw_poke(addr & 0xff, val & 0xff);
+            break;
+        }
+            
+        case TOK_PRINT:
+            if (*(*ip) == TOK_STR) {
+                (*ip)++;
+                uint8_t len = *(*ip)++;
+                print(len, (uint8_t*)*ip);
+                printf("\r\n");
+                *ip += len;
+            } else {
+                printf("%d\r\n", expr(ip));
+            }
+            break;
+            
+        case TOK_GOTO: {
+            uint8_t *new_pc = find_line(expr(ip));
+            if (new_pc && pc) {
+                *pc = new_pc;
+                return 0; // Don't advance pc
+            }
+            break;
+        }
+            
+        case TOK_INPUT: {
+            if (*(*ip) == TOK_STR) {
+                (*ip)++;
+                uint8_t len = *(*ip)++;
+                print(len, (uint8_t*)*ip);
+                *ip += len;
+                if (*(*ip) == TOK_COMMA) (*ip)++;
+            }
+            if (*(*ip) == TOK_VAR) {
+                (*ip)++;
+                current_input_var = *(*ip)++;
+                
+                // Save execution state and request input
+                if (pc) {
+                    execution_pc = *pc + 3 + (*pc)[2];  // Next line
+                }
+                request_input();
+                return -1; // Stop execution to wait for input
+            }
+            break;
+        }
+            
+        case TOK_END:
+            return -1; // Stop execution
+            
+        default:
+            // Unknown token, skip it
+            break;
+    }
+    
+    return 1; // Continue normally
+}
+
+/* ================= MAIN EXECUTION LOOP ================= */
+
 static void run_from(uint8_t *start_pc) {
     uint8_t *pc = start_pc;
 
     while (pc < program + prog_len) {
         uint8_t *ip = pc + 3;
-        int should_advance = 1;  // Flag to control if we advance to next line
+        int should_advance = 1;
 
-        switch (*ip++) {
-            case TOK_LET: {
-                if (*ip++ != TOK_VAR) break;
-                uint8_t v = *ip++;
-                ip++; /* = */
-                vars[v] = expr(&ip);
-                break;
-            }
+        while (*ip != TOK_EOL) {
+            uint8_t tok = *ip;
             
-            case TOK_INPUT: {
-                if (*ip == TOK_STR) {
-                    ip++;
-                    uint8_t len = *ip++;
-                    print(len, (uint8_t*)ip);
-                    ip += len;
-                    if (*ip == TOK_COMMA) ip++;
-                }
-                if (*ip == TOK_VAR) {
-                    ip++;
-                    current_input_var = *ip++;
-                    
-                    // Save execution state and request input
-                    execution_pc = pc + 3 + pc[2];  // Next line
-                    request_input();
-                    return;  // Exit and wait for input
-                }
-                break;
-            }
-            
-            case TOK_POKE: {
-                int16_t addr = expr(&ip);
-                if (*ip == TOK_COMMA) ip++;
-                int16_t val = expr(&ip);
-                hw_poke(addr & 0xff, val & 0xff);
-                break;
-            }
-            
-            case TOK_PRINT:
-                if (*ip == TOK_STR) {
-                    ip++;
-                    uint8_t len = *ip++;
-                    print(len, (uint8_t*)ip);
-                    printf("\r\n");
-                    ip += len;
-                } else {
-                    printf("%d\r\n", expr(&ip));
-                }
-                break;
-
-            case TOK_IF: {
+            if (tok == TOK_IF) {
+                ip++;
                 int cond = condition(&ip);
                 if (*ip == TOK_THEN) ip++;
                 
@@ -424,30 +461,12 @@ static void run_from(uint8_t *start_pc) {
                     
                     // Execute THEN clause
                     while (ip < else_pos && *ip != TOK_EOL) {
-                        uint8_t tok = *ip++;
-                        if (tok == TOK_PRINT) {
-                            if (*ip == TOK_STR) {
-                                ip++;
-                                uint8_t len = *ip++;
-                                print(len, (uint8_t*)ip);
-                                printf("\r\n");
-                                ip += len;
-                            } else {
-                                printf("%d\r\n", expr(&ip));
-                            }
-                        } else if (tok == TOK_GOTO) {
-                            uint8_t *new_pc = find_line(expr(&ip));
-                            if (new_pc) {
-                                pc = new_pc;
-                                should_advance = 0;
-                                break;
-                            }
-                        } else if (tok == TOK_LET) {
-                            if (*ip++ == TOK_VAR) {
-                                uint8_t v = *ip++;
-                                ip++;
-                                vars[v] = expr(&ip);
-                            }
+                        int result = execute_statement(&ip, &pc);
+                        if (result == 0) {
+                            should_advance = 0;
+                            break;
+                        } else if (result == -1) {
+                            return;
                         }
                     }
                 } else {
@@ -471,47 +490,26 @@ static void run_from(uint8_t *start_pc) {
                     
                     // Execute ELSE clause
                     while (*ip != TOK_EOL) {
-                        uint8_t tok = *ip++;
-                        if (tok == TOK_PRINT) {
-                            if (*ip == TOK_STR) {
-                                ip++;
-                                uint8_t len = *ip++;
-                                print(len, (uint8_t*)ip);
-                                printf("\r\n");
-                                ip += len;
-                            } else {
-                                printf("%d\r\n", expr(&ip));
-                            }
-                        } else if (tok == TOK_GOTO) {
-                            uint8_t *new_pc = find_line(expr(&ip));
-                            if (new_pc) {
-                                pc = new_pc;
-                                should_advance = 0;
-                                break;
-                            }
-                        } else if (tok == TOK_LET) {
-                            if (*ip++ == TOK_VAR) {
-                                uint8_t v = *ip++;
-                                ip++;
-                                vars[v] = expr(&ip);
-                            }
+                        int result = execute_statement(&ip, &pc);
+                        if (result == 0) {
+                            should_advance = 0;
+                            break;
+                        } else if (result == -1) {
+                            return;
                         }
                     }
                 }
                 break;
-            }
-
-            case TOK_GOTO: {
-                uint8_t *new_pc = find_line(expr(&ip));
-                if (new_pc) {
-                    pc = new_pc;
+            } else {
+                // Execute regular statement
+                int result = execute_statement(&ip, &pc);
+                if (result == 0) {
                     should_advance = 0;
+                    break;
+                } else if (result == -1) {
+                    return;
                 }
-                break;
             }
-
-            case TOK_END:
-                return;
         }
         
         if (should_advance) {
