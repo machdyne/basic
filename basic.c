@@ -16,9 +16,12 @@ int isdigit(int c);
 int toupper(int c);
 #endif
 
+
 #define MAX_PROG 1024
 #define MAX_LINE 64
 #define NUM_VARS 26
+
+void print(uint8_t len, uint8_t *str);
 
 uint8_t hw_peek(uint8_t addr);
 void hw_poke(uint8_t addr, uint8_t val);
@@ -360,7 +363,7 @@ static void run_from(uint8_t *start_pc) {
                 if (*ip == TOK_STR) {
                     ip++;
                     uint8_t len = *ip++;
-                    printf("%s", (char*)ip);
+                    print(len, (uint8_t*)ip);
                     ip += len;
                     if (*ip == TOK_COMMA) ip++;
                 }
@@ -388,7 +391,8 @@ static void run_from(uint8_t *start_pc) {
                 if (*ip == TOK_STR) {
                     ip++;
                     uint8_t len = *ip++;
-                    printf("%s\r\n", (char*)ip);
+                    print(len, (uint8_t*)ip);
+                    printf("\r\n");
                     ip += len;
                 } else {
                     printf("%d\r\n", expr(&ip));
@@ -425,7 +429,8 @@ static void run_from(uint8_t *start_pc) {
                             if (*ip == TOK_STR) {
                                 ip++;
                                 uint8_t len = *ip++;
-                                printf("%s\r\n", (char*)ip);
+                                print(len, (uint8_t*)ip);
+                                printf("\r\n");
                                 ip += len;
                             } else {
                                 printf("%d\r\n", expr(&ip));
@@ -471,7 +476,8 @@ static void run_from(uint8_t *start_pc) {
                             if (*ip == TOK_STR) {
                                 ip++;
                                 uint8_t len = *ip++;
-                                printf("%s\r\n", (char*)ip);
+                                print(len, (uint8_t*)ip);
+                                printf("\r\n");
                                 ip += len;
                             } else {
                                 printf("%d\r\n", expr(&ip));
@@ -520,6 +526,14 @@ static void run(void) {
 
 /* ================= LIST ================= */
 
+void print(uint8_t len, uint8_t *str) {
+
+	for (uint8_t i = 0; i < len; i++ ) {
+		putchar(str[i]);
+	}
+
+}
+
 static void print_token(uint8_t **ip) {
     switch (*(*ip)++) {
         case TOK_LET:   printf("LET "); break;
@@ -546,7 +560,9 @@ static void print_token(uint8_t **ip) {
 
         case TOK_STR: {
             uint8_t len = *(*ip)++;
-            printf("\"%s\"", (char*)*ip);
+            putchar('\"');
+            print(len, (uint8_t*)*ip);
+            putchar('\"');
             *ip += len;
             break;
         }
@@ -614,7 +630,7 @@ static void process_command(uint8_t *line) {
 /* ================= INPUT ROUTING ================= */
 
 void basic_yield(uint8_t *line) {
-printf(" B %s\r\n", line);
+    printf(" B %s\r\n", line);
     if (current_input_mode == INPUT_MODE_AWAITING_INPUT) {
         // Deliver line to INPUT statement handler directly
         handle_input_response(line);
