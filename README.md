@@ -14,7 +14,7 @@ A lightweight BASIC interpreter for embedded systems.
 
 ## Targets
 
-Linux and [Zwölf LS10A](https://github.com/machdyne/zwolf).
+Linux and [Zwölf LS10A](https://machdyne.com/product/zwolf-ls10/).
 
 ## Building
 
