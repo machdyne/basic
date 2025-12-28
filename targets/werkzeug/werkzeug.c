@@ -20,13 +20,6 @@
 
 #define BUFLEN 128
 
-float koch_adc_current(void);
-void koch_i2c_scan(void);
-void koch_i2c_set(uint8_t addr, uint8_t reg, uint8_t val);
-void koch_i2c_get(uint8_t addr, uint8_t reg, uint8_t *out, uint16_t len);
-void koch_report(void);
-void koch_parse(char *buf);
-
 int main(void) {
 
 	stdio_init_all();
