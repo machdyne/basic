@@ -27,6 +27,8 @@ void print(uint8_t len, uint8_t *str);
 void hw_sleep(uint16_t secs);
 uint8_t hw_peek(uint8_t addr);
 void hw_poke(uint8_t addr, uint8_t val);
+int hw_save(const char *filename, uint8_t *data, uint16_t len);
+int hw_load(const char *filename, uint8_t *data, uint16_t *len, uint16_t max_len);
 
 enum {
     TOK_EOL = 0,
@@ -628,6 +630,44 @@ static void process_command(uint8_t *line) {
         list_program();
         return;
     }
+    if (!strncmp((char*)line, "SAVE", 4)) {
+        char *filename = strchr((char*)line, ' ');
+        if (filename) {
+            filename++;
+            // Trim whitespace and newline
+            char *end = filename;
+            while (*end && *end != '\r' && *end != '\n' && *end != ' ') end++;
+            *end = '\0';
+            
+            if (hw_save(filename, program, prog_len) == 0) {
+                printf("Saved %d bytes to %s\r\n", prog_len, filename);
+            } else {
+                printf("Error saving to %s\r\n", filename);
+            }
+        } else {
+            printf("Usage: SAVE <filename>\r\n");
+        }
+        return;
+    }
+    if (!strncmp((char*)line, "LOAD", 4)) {
+        char *filename = strchr((char*)line, ' ');
+        if (filename) {
+            filename++;
+            // Trim whitespace and newline
+            char *end = filename;
+            while (*end && *end != '\r' && *end != '\n' && *end != ' ') end++;
+            *end = '\0';
+            
+            if (hw_load(filename, program, &prog_len, MAX_PROG) == 0) {
+                printf("Loaded %d bytes from %s\r\n", prog_len, filename);
+            } else {
+                printf("Error loading from %s\r\n", filename);
+            }
+        } else {
+            printf("Usage: LOAD <filename>\r\n");
+        }
+        return;
+    }
 
     uint16_t ln = atoi((char*)line);
     if (find_line(ln) != NULL) delete_line(ln);
@@ -671,6 +711,64 @@ uint8_t hw_peek(uint8_t addr) {
 void hw_poke(uint8_t addr, uint8_t val) {
 	printf(" POKE 0x%x <- 0x%x\r\n", addr, val);
 };
+
+int hw_save(const char *filename, uint8_t *data, uint16_t len) {
+    FILE *f = fopen(filename, "wb");
+    if (!f) {
+        return -1;
+    }
+    
+    // Write length first (2 bytes, little-endian)
+    uint8_t len_bytes[2];
+    len_bytes[0] = len & 0xFF;
+    len_bytes[1] = (len >> 8) & 0xFF;
+    
+    if (fwrite(len_bytes, 1, 2, f) != 2) {
+        fclose(f);
+        return -1;
+    }
+    
+    // Write program data
+    if (fwrite(data, 1, len, f) != len) {
+        fclose(f);
+        return -1;
+    }
+    
+    fclose(f);
+    return 0;
+}
+
+int hw_load(const char *filename, uint8_t *data, uint16_t *len, uint16_t max_len) {
+    FILE *f = fopen(filename, "rb");
+    if (!f) {
+        return -1;
+    }
+    
+    // Read length (2 bytes, little-endian)
+    uint8_t len_bytes[2];
+    if (fread(len_bytes, 1, 2, f) != 2) {
+        fclose(f);
+        return -1;
+    }
+    
+    uint16_t file_len = len_bytes[0] | (len_bytes[1] << 8);
+    
+    // Check if program fits
+    if (file_len > max_len) {
+        fclose(f);
+        return -1;
+    }
+    
+    // Read program data
+    if (fread(data, 1, file_len, f) != file_len) {
+        fclose(f);
+        return -1;
+    }
+    
+    *len = file_len;
+    fclose(f);
+    return 0;
+}
 
 int main(void) {
     char line[MAX_LINE];

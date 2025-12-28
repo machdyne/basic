@@ -187,6 +187,16 @@ void hw_poke(uint8_t addr, uint8_t data) {
 
 }
 
+int hw_save(const char *filename, uint8_t *data, uint16_t len) {
+    return 0;
+}
+
+int hw_load(const char *filename, uint8_t *data, uint16_t *len, uint16_t max_len) {
+	return 0;
+}
+
+// --
+
 int isalpha(int c) {
     // Check if c is uppercase or lowercase letter
     if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) {
