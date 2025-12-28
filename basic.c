@@ -675,7 +675,7 @@ void hw_poke(uint8_t addr, uint8_t val) {
 int main(void) {
     char line[MAX_LINE];
 
-    puts("Machdyne BASIC");
+    puts("///");
 
     while (1) {
         if (current_input_mode == INPUT_MODE_COMMAND) {

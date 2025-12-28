@@ -33,7 +33,7 @@ $ git clone https://github.com/cnlohr/ch32fun
 $ make
 ```
 
-## Werkzeug
+### Werkzeug
 
 You will need to have [pico-sdk](https://github.com/raspberrypi/pico-sdk) installed in your path.
 
