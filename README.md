@@ -1,6 +1,6 @@
 # Machdyne BASIC
 
-A lightweight BASIC interpreter for embedded systems.
+A lightweight BASIC implementation for embedded systems.
 
 ## Features
 
@@ -8,7 +8,7 @@ A lightweight BASIC interpreter for embedded systems.
 - **26 variables** (A-Z)
 - **Control flow** - IF/THEN/ELSE, GOTO
 - **I/O** - PRINT, INPUT
-- **Memory access** - PEEK/POKE for direct memory manipulation
+- **Hardware access** - PEEK/POKE for access to hardware
 - **Arithmetic** - Addition, subtraction, multiplication, division
 - **Comparisons** - <, >, <=, >=, <>, ==
 
@@ -18,17 +18,29 @@ Linux and [Zwölf LS10A](https://machdyne.com/product/zwolf-ls10/).
 
 ## Building
 
-### For LS10
+### Linux
+```bash
+$ make
+$ ./basic
+```
+
+### LS10
 ```bash
 $ cd targets/ls10
 $ git clone https://github.com/cnlohr/ch32fun
 $ make
 ```
 
-### For Linux
+## Werkzeug
+
+You will need to have [pico-sdk](https://github.com/raspberrypi/pico-sdk) installed in your path.
+
 ```bash
+$ cd targets/werkzeug
+$ mkdir build
+$ cd build
+$ cmake -DPICO_BOARD=machdyne_werkzeug ..
 $ make
-$ ./basic
 ```
 
 ## BASIC Language Reference
@@ -83,12 +95,30 @@ Jump to a line number:
 50 PRINT "DONE"
 ```
 
-#### PEEK/POKE (partially implemented)
-Turn an LED on or off:
+#### PEEK/POKE
+Turn an LED on or off on LS10:
 ```basic
 10 POKE 16, 128
 20 INPUT "LED 0 or 1:", L
 30 IF L == 1 THEN POKE(17, 128) ELSE POKE(17, 0)
+```
+
+Blink LEDs on Werkzeug:
+```basic
+10 POKE(18,255)
+20 LET A = 0
+30 IF A == 0 THEN LET A = 255 ELSE LET A = 0
+40 POKE(23,A)
+50 SLEEP 1
+60 GOTO 30
+```
+
+#### SLEEP
+Sleep for a number of seconds:
+```basic
+10 PRINT "SLEEPING"
+20 SLEEP 3
+30 PRINT "AWAKE"
 ```
 
 ### Operators
