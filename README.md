@@ -14,7 +14,9 @@ A lightweight BASIC implementation for embedded systems.
 
 ## Targets
 
-Linux and [Zwölf LS10A](https://machdyne.com/product/zwolf-ls10/).
+  * Linux
+  * [Werkzeug](https://github.com/machdyne/werkzeug)
+  * [Zwölf LS10A](https://machdyne.com/product/zwolf-ls10/).
 
 ## Building
 
