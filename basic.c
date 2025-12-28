@@ -643,7 +643,7 @@ static void process_command(uint8_t *line) {
 /* ================= INPUT ROUTING ================= */
 
 void basic_yield(uint8_t *line) {
-    printf(" B %s\r\n", line);
+    // printf(" B %s\r\n", line);
     if (current_input_mode == INPUT_MODE_AWAITING_INPUT) {
         // Deliver line to INPUT statement handler directly
         handle_input_response(line);
