@@ -166,6 +166,23 @@ void hw_poke(uint8_t addr, uint8_t data) {
          (ZW_GPIOH_PORT)->CFGLR |= (GPIO_Speed_10MHz | GPIO_CNF_IN_FLOATING)<<(4*ZW_GPIOH);
 		}
 
+      if ((data & 0x08) == 0x08) {
+			(ZW_GPIOD_PORT)->CFGLR &= ~(0xf<<(4*ZW_GPIOD));
+         (ZW_GPIOD_PORT)->CFGLR |= (GPIO_Speed_10MHz | GPIO_CNF_OUT_PP)<<(4*ZW_GPIOD);
+      } else {
+			(ZW_GPIOD_PORT)->CFGLR &= ~(0xf<<(4*ZW_GPIOD));
+         (ZW_GPIOD_PORT)->CFGLR |= (GPIO_Speed_10MHz | GPIO_CNF_IN_FLOATING)<<(4*ZW_GPIOB);
+
+		}
+
+      if ((data & 0x04) == 0x04) {
+			(ZW_GPIOC_PORT)->CFGLR &= ~(0xf<<(4*ZW_GPIOC));
+         (ZW_GPIOC_PORT)->CFGLR |= (GPIO_Speed_10MHz | GPIO_CNF_OUT_PP)<<(4*ZW_GPIOC);
+      } else {
+			(ZW_GPIOC_PORT)->CFGLR &= ~(0xf<<(4*ZW_GPIOC));
+         (ZW_GPIOC_PORT)->CFGLR |= (GPIO_Speed_10MHz $| GPIO_CNF_IN_FLOATING)<<(4*ZW_GPIOC);
+		}
+
       if ((data & 0x02) == 0x02) {
 			(ZW_GPIOB_PORT)->CFGLR &= ~(0xf<<(4*ZW_GPIOB));
          (ZW_GPIOB_PORT)->CFGLR |= (GPIO_Speed_10MHz | GPIO_CNF_OUT_PP)<<(4*ZW_GPIOB);
@@ -191,6 +208,16 @@ void hw_poke(uint8_t addr, uint8_t data) {
          (ZW_GPIOH_PORT)->BSHR = (1 << ZW_GPIOH);
       else
          (ZW_GPIOH_PORT)->BSHR = (1 << (16 + ZW_GPIOH));
+
+      if ((data & 0x08) == 0x08)
+         (ZW_GPIOD_PORT)->BSHR = (1 << ZW_GPIOD);
+      else
+         (ZW_GPIOD_PORT)->BSHR = (1 << (16 + ZW_GPIOD));
+
+      if ((data & 0x04) == 0x04)
+         (ZW_GPIOC_PORT)->BSHR = (1 << ZW_GPIOC);
+      else
+         (ZW_GPIOC_PORT)->BSHR = (1 << (16 + ZW_GPIOC));
 
       if ((data & 0x02) == 0x02)
          (ZW_GPIOB_PORT)->BSHR = (1 << ZW_GPIOB);
