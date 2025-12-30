@@ -154,6 +154,16 @@ Type just the line number:
 > 20
 ```
 
+#### Save a program
+```basic
+> SAVE HELLO.BAS
+```
+
+#### Load a program
+```basic
+> LOAD HELLO.BAS
+```
+
 ## Example Programs
 
 ### Hello World
