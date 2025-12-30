@@ -312,12 +312,12 @@ void hw_list(void) {
     read_header(&header);
     
     if (header.magic != FS_MAGIC) {
-        printf("Filesystem not initialized\n");
+        printf("Filesystem not initialized\r\n");
         return;
     }
     
     if (header.first_file == 0) {
-        printf("No files\n");
+        printf("No files\r\n");
         return;
     }
     
@@ -330,22 +330,22 @@ void hw_list(void) {
         read_entry(addr, &entry);
         
         if (!validate_entry(&entry)) {
-            printf("  [CORRUPT at 0x%08X]\n", (unsigned int)addr);
+            printf("  [CORRUPT at 0x%08X]\r\n", (unsigned int)addr);
             break;
         }
         
-        printf("  %-32s %10u bytes\n", entry.filename, (unsigned int)entry.size);
+        printf("  %s %u bytes\r\n", entry.filename, (unsigned int)entry.size);
         count++;
         addr = entry.next_file;
         
         /* Safety check to prevent infinite loops */
         if (count > 1000) {
-            printf("  [List truncated - possible corruption]\n");
+            printf("  [List truncated - possible corruption]\r\n");
             break;
         }
     }
     
-    printf("Total: %d file(s)\n", count);
+    printf("Total: %d file(s)\r\n", count);
 }
 
 /* Delete a file */
