@@ -180,7 +180,7 @@ void hw_poke(uint8_t addr, uint8_t data) {
          (ZW_GPIOC_PORT)->CFGLR |= (GPIO_Speed_10MHz | GPIO_CNF_OUT_PP)<<(4*ZW_GPIOC);
       } else {
 			(ZW_GPIOC_PORT)->CFGLR &= ~(0xf<<(4*ZW_GPIOC));
-         (ZW_GPIOC_PORT)->CFGLR |= (GPIO_Speed_10MHz $| GPIO_CNF_IN_FLOATING)<<(4*ZW_GPIOC);
+         (ZW_GPIOC_PORT)->CFGLR |= (GPIO_Speed_10MHz | GPIO_CNF_IN_FLOATING)<<(4*ZW_GPIOC);
 		}
 
       if ((data & 0x02) == 0x02) {
