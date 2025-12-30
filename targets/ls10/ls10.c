@@ -11,15 +11,23 @@
 uint8_t rx_buf[RX_BUF_LEN] = {0}; // DMA receive buffer for incoming data
 uint8_t cmd_buf[RX_BUF_LEN] = {0}; // buffer for complete command strings
 
+void fram_init(void);
+void fs_init(void);
+void hw_list(void);
+
 void basic_yield(uint8_t *line);
 
 int main()
 {
 	SystemInit();
 	funGpioInitAll();
+	fram_init();
 
-	Delay_Ms(150);
+	Delay_Ms(100);
 	printf("///\r\n");
+
+	fs_init();
+	hw_list();
 
 	// enable rx pin
 	USART1->CTLR1 |= USART_CTLR1_RE;
@@ -185,14 +193,6 @@ void hw_poke(uint8_t addr, uint8_t data) {
 
 	}
 
-}
-
-int hw_save(const char *filename, uint8_t *data, uint16_t len) {
-    return 0;
-}
-
-int hw_load(const char *filename, uint8_t *data, uint16_t *len, uint16_t max_len) {
-	return 0;
 }
 
 // --

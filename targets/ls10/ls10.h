@@ -19,4 +19,7 @@
 #define ZW_GPIOH_PORT   GPIOD    // LED
 #define ZW_GPIOH        4
 
+#define SPI_SS_PORT     GPIOD
+#define SPI_SS          3
+
 #endif
