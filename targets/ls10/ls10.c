@@ -167,6 +167,8 @@ void hw_poke(uint8_t addr, uint8_t data) {
 		}
 
       if ((data & 0x08) == 0x08) {
+         // Disable UART transmitter
+         USART1->CTLR1 &= ~USART_CTLR1_TE;
 			(ZW_GPIOD_PORT)->CFGLR &= ~(0xf<<(4*ZW_GPIOD));
          (ZW_GPIOD_PORT)->CFGLR |= (GPIO_Speed_10MHz | GPIO_CNF_OUT_PP)<<(4*ZW_GPIOD);
       } else {
@@ -176,6 +178,8 @@ void hw_poke(uint8_t addr, uint8_t data) {
 		}
 
       if ((data & 0x04) == 0x04) {
+         // Disable UART receiver
+         USART1->CTLR1 &= ~USART_CTLR1_RE;
 			(ZW_GPIOC_PORT)->CFGLR &= ~(0xf<<(4*ZW_GPIOC));
          (ZW_GPIOC_PORT)->CFGLR |= (GPIO_Speed_10MHz | GPIO_CNF_OUT_PP)<<(4*ZW_GPIOC);
       } else {
