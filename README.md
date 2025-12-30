@@ -135,13 +135,13 @@ Sleep for a number of seconds:
 
 #### RUN
 Execute the stored program:
-```
+```basic
 > RUN
 ```
 
 #### LIST
 Display the stored program:
-```
+```basic
 > LIST
 10 PRINT "HELLO"
 20 INPUT A
@@ -150,7 +150,7 @@ Display the stored program:
 
 #### Delete a line
 Type just the line number:
-```
+```basic
 > 20
 ```
 
