@@ -56,6 +56,7 @@ int main()
 	// EN: 1 (enable DMA)
 	DMA1_Channel5->CFGR = DMA_CFGR1_CIRC | DMA_CFGR1_MINC | DMA_CFGR1_EN;
 
+   u32 bootctr = 1;
 
 	while(1)
 	{
@@ -63,12 +64,22 @@ int main()
 		static u32 cmd_end = 0; // end index of current command in rx_buf
 		static u32 cmd_st = 0; // start index of current command in rx_buf
 
+      if (bootctr == 0x00800000) {
+			basic_yield("LOAD BOOT.BAS");
+			basic_yield("RUN");
+			bootctr = 0;
+      }
+
+		if (bootctr) ++bootctr;
+
 		// calculate head position based on DMA counter (modulo when DMA1_Channel5->CNTR = 0)
 		u32 head = (RX_BUF_LEN - DMA1_Channel5->CNTR) % RX_BUF_LEN; // current write position in rx_buf
 		
 		// process new bytes in rx_buf. when a newline character is detected, the command is copied to cmd_buf
 		while (tail != head)
 		{
+
+			bootctr = 0;	// disable boot
 
 			putchar(rx_buf[tail]); // echo			
 			if (rx_buf[tail] == '\r') putchar('\n');

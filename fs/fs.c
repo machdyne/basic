@@ -321,7 +321,7 @@ void hw_list(void) {
         return;
     }
     
-    printf("Files:\n");
+    printf("Files:\r\n");
     uint32_t addr = header.first_file;
     int count = 0;
     
