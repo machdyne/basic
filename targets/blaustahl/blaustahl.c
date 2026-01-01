@@ -31,8 +31,10 @@ void basic_yield(uint8_t *line);
 uint8_t booting = 1;
 
 int64_t timer_callback(alarm_id_t id, void *user_data) {
-	basic_yield("LOAD BOOT.BAS");
-	basic_yield("RUN");
+	if (booting) {
+		basic_yield("LOAD BOOT.BAS");
+		basic_yield("RUN");
+	}
 	return 0;
 }
 
