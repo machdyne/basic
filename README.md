@@ -16,6 +16,7 @@ A lightweight BASIC implementation for embedded systems.
 
   * Linux
   * [Werkzeug](https://github.com/machdyne/werkzeug)
+  * [Blaustahl](https://github.com/machdyne/blaustahl)
   * [Zwölf LS10A](https://machdyne.com/product/zwolf-ls10/)
 
 ## Building
@@ -33,15 +34,27 @@ $ git clone https://github.com/cnlohr/ch32fun
 $ make
 ```
 
-### Werkzeug
+### RP2040 (Werkzeug / Blaustahl)
 
-You will need to have [pico-sdk](https://github.com/raspberrypi/pico-sdk) installed in your path.
+You will need to have [pico-sdk](https://github.com/raspberrypi/pico-sdk) installed in your path. The following commands will produce a UF2 file that you can use to update the firmware on the device.
+
+#### Werkzeug
 
 ```bash
 $ cd targets/werkzeug
 $ mkdir build
 $ cd build
 $ cmake -DPICO_BOARD=machdyne_werkzeug ..
+$ make
+```
+
+#### Blaustahl
+
+```bash
+$ cd targets/blaustahl
+$ mkdir build
+$ cd build
+$ cmake ..
 $ make
 ```
 
