@@ -22,7 +22,7 @@ target_compile_definitions(blaustahl PUBLIC
 
 pico_sdk_init()
 
-target_link_libraries(blaustahl PRIVATE pico_stdlib pico_stdio_usb hardware_resets hardware_irq hardware_adc hardware_spi)
+target_link_libraries(blaustahl PRIVATE pico_stdlib pico_stdio_usb hardware_resets hardware_irq hardware_timer hardware_adc hardware_spi)
 
 # enable usb output, disable uart output
 pico_enable_stdio_usb(blaustahl 1)

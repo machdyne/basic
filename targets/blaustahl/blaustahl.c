@@ -13,6 +13,7 @@
 
 #include "pico/stdlib.h"
 #include "hardware/watchdog.h"
+#include "hardware/timer.h"
 #include "hardware/adc.h"
 #include "pico/stdlib.h"
 #include "pico/binary_info.h"
@@ -26,6 +27,14 @@ void fs_init(void);
 void hw_list(void);
 
 void basic_yield(uint8_t *line);
+
+uint8_t booting = 1;
+
+int64_t timer_callback(alarm_id_t id, void *user_data) {
+	basic_yield("LOAD BOOT.BAS");
+	basic_yield("RUN");
+	return 0;
+}
 
 int main(void) {
 
@@ -47,6 +56,8 @@ int main(void) {
 
    hw_list();
 
+	add_alarm_in_ms(3000, timer_callback, NULL, false);
+
 	// parser
    char buf[BUFLEN];
    int bptr = 0;
@@ -54,20 +65,14 @@ int main(void) {
 
 	bzero(buf, BUFLEN);
 
-	uint32_t bootctr = 1;
-
 	// wait for commands
 	while (1) {
-
-		if (bootctr == 0x00800000) {
-         basic_yield("LOAD BOOT.BAS");
-         basic_yield("RUN");
-         bootctr = 0;
-		}
 
 		c = getchar();
 
 		if (c > 0) {
+
+			booting = 0;
 
 			if (c == 0x0a || c == 0x0d) {
 				putchar(0x0a);
@@ -91,6 +96,8 @@ int main(void) {
 			buf[bptr++] = c;
 
 		}
+
+		tight_loop_contents(); 
 
 	}
 
