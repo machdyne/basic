@@ -20,6 +20,7 @@ static uint8_t gc;                  /* this transaction is a broadcast */
 static uint8_t info_i;              /* position in INFO */
 static uint8_t addr_n, addr_v;      /* ADDR bytes received */
 static uint8_t out_tx;              /* CDATA bytes handed out, not committed */
+static uint8_t filler;              /* the last byte handed out was not output */
 
 /* shared with the main loop */
 static volatile uint8_t in_buf[SECHS_IN_SIZE], out_buf[SECHS_OUT_SIZE];
@@ -31,7 +32,8 @@ void sechs_init(uint8_t addr, uint8_t caps) {
     sechs.r[SR_VER] = SECHS_VERSION;
     sechs.r[SR_CAPS] = caps;
     sechs.r[SR_OK] = 1;
-    sechs.addr = addr;
+    /* never an address outside 0x08-0x77 (a damaged one in storage) */
+    sechs.addr = (uint8_t)(addr - 0x08) <= 0x77 - 0x08 ? addr : SECHS_DEFAULT_ADDR;
 }
 
 #define IN_COUNT()  ((uint8_t)(in_w - in_r))
@@ -39,6 +41,7 @@ void sechs_init(uint8_t addr, uint8_t caps) {
 
 void sechs_start(uint8_t general_call) {
     out_tx = 0;
+    filler = 1;
     first = 1;
     gc = general_call;
     if (!gc) sechs.networked = 1;
@@ -94,10 +97,11 @@ uint8_t sechs_tx(void) {
     } else if (r == SR_COUT) {
         v = OUT_COUNT();
     } else if (r == SR_CDATA) {
-        /* removed from the buffer only when the transfer ends, so that a
-         * byte the hardware loaded but never sent is not lost */
-        if (out_tx < OUT_COUNT())
-            v = out_buf[(out_r + out_tx++) & (SECHS_OUT_SIZE - 1)];
+        /* Removed from the buffer only when the transfer ends: the hardware
+         * loads one byte ahead, and the last one loaded is never sent.
+         * Beyond the bytes waiting, 0 (a filler, not counted). */
+        filler = out_tx >= OUT_COUNT();
+        if (!filler) v = out_buf[(out_r + out_tx++) & (SECHS_OUT_SIZE - 1)];
         return v;   /* a port: no advance */
     } else if (r >= SR_REG && r < SR_REG + 16) {
         v = sechs_regs()[r - SR_REG];
@@ -107,7 +111,10 @@ uint8_t sechs_tx(void) {
 }
 
 void sechs_stop(uint8_t unsent) {
-    out_r += out_tx > unsent ? out_tx - unsent : 0;
+    /* the bytes the controller took: those handed out, less the one
+     * loaded ahead and never sent, unless that one was a filler */
+    if (unsent && !filler && out_tx) out_tx--;
+    out_r += out_tx;
     out_tx = 0;
     if (sechs.new_addr) {
         sechs.addr = sechs.new_addr;
@@ -121,10 +128,18 @@ int sechs_getc(void) {
     return in_buf[in_r++ & (SECHS_IN_SIZE - 1)];
 }
 
-/* When the controller does not read, output is dropped rather than
- * stopping the program. (Dropping the newest keeps out_r owned by the
- * interrupt handler alone.) */
+/* Console output for the controller. (Only the interrupt handler moves
+ * out_r; this only moves out_w.) */
 void sechs_putc(char c) {
-    if (OUT_COUNT() < SECHS_OUT_SIZE)
-        out_buf[out_w++ & (SECHS_OUT_SIZE - 1)] = c;
+    /* full: wait for the controller to read (255 sechs_wait calls, about
+     * half a second); if nobody reads, the console is left: no more output
+     * for it until the controller types again (con_active) */
+    for (uint8_t t = 1; OUT_COUNT() >= SECHS_OUT_SIZE; t++) {
+        if (!t) {
+            sechs.con_active = 0;
+            return;
+        }
+        sechs_wait();
+    }
+    out_buf[out_w++ & (SECHS_OUT_SIZE - 1)] = c;
 }

@@ -113,8 +113,10 @@ static void reg_read(uint8_t reg, uint8_t *out, int n) {
     sechs_start(0);
     sechs_rx(reg);
     sechs_start(0);     /* repeated start, read */
+    /* like the hardware: one byte loaded ahead, never sent */
     for (int i = 0; i < n; i++) out[i] = sechs_tx();
-    sechs_stop(0);
+    sechs_tx();
+    sechs_stop(1);
 }
 
 static uint8_t reg1(uint8_t reg) {
@@ -152,17 +154,30 @@ static void con_type(const char *s) {
     }
 }
 
-/* everything the console has printed */
-static char *con_read(void) {
-    static char out[4096];
-    int len = 0, n;
+/* Everything the console has printed. A controller that reads while the
+ * module waits for room (sechs_wait) collects it here too. */
+static char con_out[8192];
+static int con_len, reading = 1;
+
+static void con_drain(void) {
+    int n;
     while ((n = reg1(SR_COUT)) > 0) {
         uint8_t b[64];
         reg_read(SR_CDATA, b, n);
-        for (int i = 0; i < n; i++) if (b[i] != '\r') out[len++] = b[i];
+        for (int i = 0; i < n; i++)
+            if (b[i] != '\r' && con_len < (int)sizeof(con_out) - 1) con_out[con_len++] = b[i];
     }
-    out[len] = 0;
-    return out;
+}
+
+void sechs_wait(void) {
+    if (reading) con_drain();
+}
+
+static char *con_read(void) {
+    con_drain();
+    con_out[con_len] = 0;
+    con_len = 0;
+    return con_out;
 }
 
 /* ---- tests ---------------------------------------------------------------- */
@@ -285,9 +300,56 @@ int main(void) {
     CHECK(x == 'A' && y == 'B' && out[0] == 'B', "prefetch: [%c%c] [%s]", x, y, out);
 
     /* output that nobody reads is dropped, not blocking */
+    reading = 0;
     con_type("10 FOR I = 1 TO 50: PRINT \"LINE\"; I: NEXT\rRUN\r");
+    reading = 1;
     out = con_read();
-    CHECK(strlen(out) <= SECHS_OUT_SIZE, "output limited to the buffer");
+    CHECK(strlen(out) <= SECHS_OUT_SIZE, "unread output limited to the buffer");
+
+    /* and output that is read arrives complete */
+    con_type("RUN\r");
+    out = con_read();
+    CHECK(strstr(out, "LINE1\n") && strstr(out, "LINE50\n"), "read output complete");
+
+    /* long output through the 64-byte buffer, read while the module
+     * waits; reads of exactly what is waiting (the hardware loads one byte
+     * ahead) must not leave a byte behind */
+    con_read();
+    con_type("NEW\r");
+    con_read();
+    con_type("HELP\r");
+    char *h = con_read();
+    CHECK(strstr(h, "RUN LIST NEW SAVE") && strstr(h, "STEP THEN TO WAIT"),
+        "HELP complete over I2C: %.80s", h);
+    CHECK(strlen(h) > 200 && !strstr(h, "DDD") && !strstr(h, "   "),
+        "HELP without repeated bytes (%d bytes)", (int)strlen(h));
+    con_type("10 PRINT \"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijkl\"\r");
+    con_type("LIST\r");
+    h = con_read();
+    CHECK(!strcmp(h, "10 PRINT \"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijkl\"\n"),
+        "a long line listed intact: %s", h);
+
+    /* a controller that stops reading: the module goes on (output is
+     * dropped), and output arrives again once it reads */
+    reading = 0;
+    con_type("HELP\r");
+    reading = 1;
+    con_read();
+    con_type("LIST\r");
+    h = con_read();
+    CHECK(!strncmp(h, "10 PRINT", 8), "output again after a stall: %.60s", h);
+
+    /* a stored address outside 0x08-0x77 is never used */
+    {
+        uint8_t keep = sechs.addr;
+        sechs_init(0x00, CAP_FILES);
+        CHECK(sechs.addr == SECHS_DEFAULT_ADDR, "address 0x00 replaced by the default");
+        sechs_init(0x7E, CAP_FILES);
+        CHECK(sechs.addr == SECHS_DEFAULT_ADDR, "address 0x7e replaced by the default");
+        sechs_init(0x3F, CAP_FILES);
+        CHECK(sechs.addr == 0x3F, "a valid address is kept");
+        sechs.addr = keep;
+    }
 
     if (failures) {
         printf("FAILED: %d\n", failures);

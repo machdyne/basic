@@ -9,7 +9,7 @@
 #include "../../basic.h"
 #include "../../sechs/sechs.h"
 
-#define RX_BUF_LEN 128      // UART receive ring (DMA)
+#define RX_BUF_LEN 32       // UART receive ring (DMA)
 #define BOOT_WINDOW_MS 600  // Sechs: at least 500, at most 1000
 
 // The filesystem uses the F-RAM up to FS_SIZE; the Sechs address is kept
@@ -18,9 +18,9 @@
 #define CFG_ADDR (FRAM_SIZE - 16)
 
 uint8_t rx_buf[RX_BUF_LEN];
-static uint8_t cmd_buf[RX_BUF_LEN];
 static u32 tail;            // read position in rx_buf
-static u32 cmd_len;         // characters collected in cmd_buf
+static u32 cmd_len;         // characters collected in basic_line (the
+                            // console line: shared with LOAD, for RAM)
 
 static uint8_t uart_awake;  // the UART console has been woken
 static uint8_t halted;
@@ -51,8 +51,10 @@ static void i2c_target_on(void) {
 static void i2c_target_init(void) {
     uint8_t c[3];
     fs_media_read(CFG_ADDR, c, 3);
-    sechs_init((c[0] == 0xA5 && c[2] == (uint8_t)~c[1]) ? c[1]
-        : SECHS_DEFAULT_ADDR, CAP_FILES | CAP_UART_CON | CAP_I2C_CON);
+    // the stored address and its complement must agree; sechs_init also
+    // refuses one outside 0x08-0x77 (blank F-RAM fails both)
+    sechs_init(c[2] == (uint8_t)~c[1] ? c[1] : 0,
+        CAP_FILES | CAP_UART_CON | CAP_I2C_CON);
     RCC->APB2PCENR |= RCC_APB2Periph_GPIOC | RCC_APB2Periph_AFIO;
     RCC->APB1PCENR |= RCC_APB1Periph_I2C1;
     RCC->APB1PRSTR |= RCC_APB1Periph_I2C1;
@@ -119,15 +121,41 @@ static void uart_wake(void) {
     put_str("///\r\n");
 }
 
+#ifdef DIAG_BREAK
+// (a diagnostic build: how much of the stack was never used, after each
+// console command; the free RAM is painted at start-up)
+extern uint8_t _ebss[];
+
+static void stack_paint(void) {
+    uint8_t *sp;
+    __asm__ volatile ("mv %0, sp" : "=r"(sp));
+    for (uint8_t *p = _ebss; p < sp - 16; p++) *p = 0xA5;
+}
+
+static void stack_report(void) {
+    uint16_t n = 0;
+    char d[6];
+    int8_t k = 0;
+    while (_ebss[n] == 0xA5) n++;
+    do d[k++] = '0' + n % 10; while (n /= 10);
+    put_str("[free ");
+    while (k) hw_putc(d[--k]);
+    put_str("]\r\n");
+}
+#endif
+
 static void console_char(uint8_t c) {
     hw_putc(c);     // echo
     if (c == '\r' || c == '\n') {
         if (c == '\r') hw_putc('\n');
-        cmd_buf[cmd_len] = '\0';
+        basic_line[cmd_len] = '\0';
         cmd_len = 0;
-        basic_yield(cmd_buf);
-    } else if (cmd_len < RX_BUF_LEN - 1) {
-        cmd_buf[cmd_len++] = c;
+        basic_yield((uint8_t *)basic_line);
+#ifdef DIAG_BREAK
+        stack_report();
+#endif
+    } else if (cmd_len < BASIC_LINE - 1) {
+        basic_line[cmd_len++] = c;
     }
 }
 
@@ -181,6 +209,9 @@ static uint8_t uart_poll(void) {
 int main()
 {
 	SystemInit();
+#ifdef DIAG_BREAK
+	stack_paint();
+#endif
 	// ch32fun connected the UART transmitter to D: disconnect it, so that
 	// D is not driven until the console is woken (the UART itself stays
 	// on for the hard fault printer).
@@ -224,6 +255,12 @@ int main()
 
 // ---- console and time --------------------------------------------------
 
+// the I2C console's output is full: the controller reads meanwhile, in the
+// I2C interrupt (255 of these, about half a second, before giving up)
+void sechs_wait(void) {
+    Delay_Ms(2);
+}
+
 void hw_putc(char c) {
     if (uart_awake) putchar(c);
     if (sechs.con_active) sechs_putc(c);
@@ -232,8 +269,16 @@ void hw_putc(char c) {
 // A running program stops on Ctrl-C (UART or I2C console) or a Sechs
 // HALT. On the UART, Ctrl-C must be the last character received; it and
 // anything typed before it are discarded.
+// (DIAG_BREAK, a diagnostic build: say which condition stopped a program)
+#ifdef DIAG_BREAK
+#define WHY(s) put_str(s)
+#else
+#define WHY(s)
+#endif
+
 int hw_break(void) {
     if (sechs.cmd == CMD_HALT || sechs.con_break) {
+        WHY(sechs.con_break ? "[I2C ^C]" : "[HALT]");
         sechs.con_break = 0;
         service();
         return 1;
@@ -242,8 +287,8 @@ int hw_break(void) {
     u32 head = rx_head();
     if (uart_awake && head != tail &&
         rx_buf[(head - 1) % RX_BUF_LEN] == 0x03) {
+        WHY("[UART ^C]");
         tail = head;
-        cmd_len = 0;
         return 1;
     }
     return 0;
@@ -373,6 +418,14 @@ void hw_led(uint8_t on) {
     (ZW_GPIOH_PORT)->CFGLR |= (GPIO_Speed_10MHz | GPIO_CNF_OUT_PP) << (4 * ZW_GPIOH);
 }
 
+#ifdef DIAG_BREAK
+// (a diagnostic build has no room for the local I2C controller)
+int hw_i2c(uint8_t addr, const uint8_t *w, uint8_t wn, uint8_t *r,
+           uint8_t rn) {
+    (void)addr; (void)w; (void)wn; (void)r; (void)rn;
+    return -1;
+}
+#else
 // ---- local I2C controller on C (SCL) and D (SDA), bit-banged ----------
 
 #define SCL 2
@@ -430,3 +483,4 @@ int hw_i2c(uint8_t addr, const uint8_t *w, uint8_t wn, uint8_t *r,
     line(SDA, 1);
     return res ? -1 : 0;
 }
+#endif
