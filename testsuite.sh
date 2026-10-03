@@ -939,9 +939,9 @@ RUN
 RUN
 10 OPEN \"A B\" FOR OUTPUT AS 1
 RUN" \
-"FILE NOT OPEN IN 10
+"NOT OPEN IN 10
 BAD FILE # IN 10
-FILE NOT OPEN IN 10
+NOT OPEN IN 10
 BAD NAME IN 10"
 
 run_test "A program's file is closed when it ends" \
@@ -1300,6 +1300,16 @@ RUN
 HI
 SAVE BOOT' ./sechsctl -d "$PTY" send 12 ZZSEND.TXT
 run_tool "bridge: a register set by the program" "42" ./sechsctl -d "$PTY" reg 12 3
+echo "HELP" > ZZSEND.TXT
+TOTAL=$((TOTAL + 1))
+help=$(./sechsctl -d "$PTY" send 12 ZZSEND.TXT 2>&1)
+if echo "$help" | grep -q "RUN LIST NEW SAVE" && echo "$help" | grep -q "STEP THEN TO WAIT"; then
+    echo -e "${GREEN}✓${NC} bridge: long output over the I2C console arrives complete"
+    PASSED=$((PASSED + 1))
+else
+    echo -e "${RED}✗${NC} bridge: long output over the I2C console: $help"
+    FAILED=$((FAILED + 1))
+fi
 ./sechsctl -d "$PTY" reg 12 5 7
 run_tool "bridge: write and read a register" "7" ./sechsctl -d "$PTY" reg 12 5
 echo "TYPE BOOT" > ZZSEND.TXT

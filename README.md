@@ -16,6 +16,8 @@ A lightweight BASIC implementation for embedded systems.
 - **Files** - Programs are saved as plain text, on a power-loss-safe filesystem on modules
 - **Errors** - Reported with the line number; Ctrl-C stops a running program
 
+Planned work is described in [docs/plan.md](docs/plan.md).
+
 ## Targets
 
   * Linux
@@ -423,7 +425,7 @@ DIV BY 0 IN 10
 | `TOO BIG` | a number or line number above 32767 |
 | `NO LINE` | `GOTO` or `GOSUB` to a line that does not exist |
 | `DIV BY 0` | division or `MOD` by zero |
-| `OUT OF MEMORY` | the program does not fit |
+| `NO MEMORY` | the program does not fit |
 | `BAD NAME` | not an 8.3 file name |
 | `NOT FOUND` | no such file |
 | `DISK FULL` / `DIR FULL` | no room for the file |
@@ -433,7 +435,7 @@ DIV BY 0 IN 10
 | `PIN NOT DECLARED` | the pin is not declared for this use in `PINS` |
 | `BAD PINS` | a `PINS` declaration that is not allowed |
 | `OUT OF RANGE` | a pin or register number |
-| `BAD FILE #`, `FILE NOT OPEN`, `FILE OPEN`, `END OF FILE` | data files |
+| `BAD FILE #`, `NOT OPEN`, `FILE OPEN`, `END OF FILE` | data files |
 | `I2C ERROR` | an I2C device did not answer |
 | `ON A BUS` | pins 1 and 2 cannot be outputs: the module is on a Sechs bus |
 | `DAMAGED`, `I/O ERROR` | storage problem |

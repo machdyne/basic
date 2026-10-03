@@ -34,6 +34,13 @@ int hw_break(void) {
     return 0;
 }
 void hw_delay_ms(uint16_t ms) { (void)ms; }
+
+/* the console output is full: a host that serves the bus (bridge_host)
+ * lets the controller read now, as the I2C interrupt does on a module */
+void sechs_wait(void) {
+    if (sim_poll) sim_poll();
+    usleep(2000);       /* as long as on LS10 */
+}
 /* like LS10: pins 1 and 2 cannot be outputs once a controller has
  * addressed the module */
 int hw_pin_mode(uint8_t p, uint8_t m) {
@@ -157,7 +164,10 @@ static int bus_read(uint8_t a, uint8_t reg, uint8_t *d, int n) {
     sechs_start(0);
     sechs_rx(reg);
     sechs_start(0);
+    /* like the hardware: one byte is always loaded ahead, and the last one
+     * loaded is never sent */
     for (int i = 0; i < n; i++) d[i] = sechs_tx();
-    sechs_stop(0);
+    sechs_tx();
+    sechs_stop(1);
     return 0;
 }

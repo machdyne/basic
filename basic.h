@@ -42,6 +42,12 @@ void hw_delay_ms(uint16_t ms);     /* ms <= 1000 */
 
 
 /* Sechs pins 1-4 (A, B, C, D) and their modes (PINS) */
+/* One line of text: LOAD reads into it. A target with little RAM may use
+ * it as its console line buffer too (LS10 does): LOAD takes its file name
+ * from the console line before it reads into the buffer. */
+#define BASIC_LINE 128
+extern char basic_line[BASIC_LINE];
+
 /* Pins a program can use: 1-4 in BASIC 1; a target with more pins defines
  * HW_PINS and gets the PIN statement (an extension, not BASIC 1). */
 #ifndef HW_PINS

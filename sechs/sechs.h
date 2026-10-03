@@ -91,6 +91,10 @@ int sechs_getc(void);                     /* console input, -1 if none */
 void sechs_putc(char c);                  /* console output */
 
 /* ---- implemented by the target ---- */
+/* the console output is full: wait about 2 ms (the controller reads
+ * meanwhile, in the I2C interrupt); after 255 waits without room, the
+ * console counts as left */
+void sechs_wait(void);
 void sechs_set_addr(uint8_t addr);        /* new address: hardware and
                                              persistent storage */
 uint8_t sechs_info(uint8_t i);            /* byte i of INFO, 0 at end */

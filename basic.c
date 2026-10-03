@@ -12,7 +12,7 @@
 
 #define MAX_PROG  1024
 #define MAX_TOK   64    /* tokens per line */
-#define MAX_SRC   100   /* characters per listed line (and LOAD buffer) */
+#define MAX_SRC   (BASIC_LINE - 1)  /* characters per line LOAD reads */
 #define NUM_VARS  26
 #define MAX_FOR   6     /* nested FOR loops */
 #define MAX_GOSUB 8     /* nested GOSUBs */
@@ -48,10 +48,10 @@ enum {
 /* error messages in order, separated by NULs (no pointer table: flash
  * is scarce on small targets) */
 static const char err_msg[] =
-    "\0SYNTAX ERROR\0TOO LONG\0TOO BIG\0NO LINE\0DIV BY 0\0OUT OF MEMORY\0"
+    "\0SYNTAX ERROR\0TOO LONG\0TOO BIG\0NO LINE\0DIV BY 0\0NO MEMORY\0"
     "BAD NAME\0NOT FOUND\0DISK FULL\0DIR FULL\0I/O ERROR\0NOT FORMATTED\0"
     "DAMAGED\0NOT SUPPORTED\0BREAK\0NO FOR\0NO GOSUB\0TOO DEEP\0"
-    "PIN NOT DECLARED\0OUT OF RANGE\0BAD FILE #\0FILE OPEN\0FILE NOT OPEN\0"
+    "PIN NOT DECLARED\0OUT OF RANGE\0BAD FILE #\0FILE OPEN\0NOT OPEN\0"
     "END OF FILE\0I2C ERROR\0BAD PINS\0ON A BUS";
 
 /* Keywords in alphabetical order, except that a keyword comes before any
@@ -627,19 +627,6 @@ static void enter_line(char *line) {
     int len = tokenize(line, tmp + 3);
     if (!len) return;
 
-    /* every stored line must fit LOAD's buffer when listed */
-    tmp[0] = ln & 0xff;
-    tmp[1] = ln >> 8;
-    tmp[2] = len;
-    uint8_t m = out_mode;
-    out_mode = OUT_COUNT;
-    out_count = 0;
-    list_line(tmp);
-    out_mode = m;
-    if (out_count > MAX_SRC) {
-        err = E_LINE_TOO_LONG;
-        return;
-    }
 
     delete_line(ln);
     insert_line(ln, tmp + 3, len);
@@ -1365,8 +1352,10 @@ static void cmd_save(char *arg) {
 }
 
 /* LOAD and TYPE: read the open file line by line */
+char basic_line[BASIC_LINE];
+
 static void cmd_read(char *arg, uint8_t load) {
-    static char line[MAX_SRC + 2];
+    char *line = basic_line;    /* (arg may be in it: used up by open_arg) */
     int16_t c;
     uint8_t n = 0;
     if (!open_arg(arg, FS_READ)) return;
@@ -1449,8 +1438,11 @@ static void process_command(char *line) {
                 cmd_format(arg);
                 break;
             default:    /* HELP */
+#ifndef NO_HELP
                 help(cmd_names);
                 help(kw_names);
+#endif
+                break;
         }
     }
 

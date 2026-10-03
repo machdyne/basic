@@ -31,8 +31,8 @@ one or more statements separated by `:`.
   canonical spacing.
 - **`REM`** makes the rest of the line a comment, including any `:`.
 - A line must fit in 64 tokens (about 64 keywords, numbers, variables and
-  operators), and its listed form in 100 characters (`TOO LONG`), so that
-  every saved program can be loaded again.
+  operators; `TOO LONG`). `LOAD` reads lines of up to 127 characters, the
+  longest line the console accepts.
 
 Programs are stored and transferred as text: the form `LIST` shows.
 
@@ -290,7 +290,7 @@ only where they exist.
 |---|---|
 | Program memory | 1,024 bytes (tokenized) |
 | Tokens per line | 64 |
-| Listed line length | 100 characters |
+| Line length read by `LOAD` | 127 characters (as typed at the console) |
 | Active `FOR` loops | 6 |
 | Active `GOSUB`s | 8 |
 | Variables | 26 (`A`-`Z`) |
@@ -308,14 +308,14 @@ An implementation may provide more, but not less.
 | `TOO BIG` | a number or line number above 32767 |
 | `NO LINE` | `GOTO`/`GOSUB`/`THEN`/`ELSE` to a missing line |
 | `DIV BY 0` | `/` or `MOD` by zero |
-| `OUT OF MEMORY` | the program does not fit |
+| `NO MEMORY` | the program does not fit |
 | `NO FOR`, `NO GOSUB` | `NEXT` without its `FOR`, `RETURN` without `GOSUB` |
 | `TOO DEEP` | more than 6 loops or 8 calls active |
 | `PIN NOT DECLARED`, `BAD PINS`, `ON A BUS` | pins (section 8) |
 | `OUT OF RANGE` | a pin or register number |
 | `I2C ERROR` | an I2C device did not answer `I2C` |
 | `BAD NAME`, `NOT FOUND`, `DISK FULL`, `DIR FULL` | files |
-| `BAD FILE #`, `FILE OPEN`, `FILE NOT OPEN`, `END OF FILE` | data files |
+| `BAD FILE #`, `FILE OPEN`, `NOT OPEN`, `END OF FILE` | data files |
 | `NOT FORMATTED`, `DAMAGED`, `I/O ERROR` | storage |
 | `NOT SUPPORTED` | the hardware for it is not there |
 | `BREAK` | stopped by Ctrl-C |

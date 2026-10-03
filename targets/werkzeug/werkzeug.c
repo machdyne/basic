@@ -118,11 +118,17 @@ void hw_led(uint8_t on) {
 // ---- I2C controller, bit-banged (BASIC on pins 3/4, the bridge on 1/2) ----
 //
 // The controller drives the clock, so timing jitter does no harm; devices
-// may stretch the clock. About 50 kHz with the internal pull-ups.
+// may stretch the clock.
+
+// Half a clock period: 5 us for BASIC's I2C (pins 3/4, about 50 kHz with
+// the pull-ups a user adds); 25 us for the bridge (pins 1/2, about 10 kHz),
+// so that even the RP2040's weak internal pull-ups (50-80k, rise times of
+// microseconds) give clean edges.
+static uint8_t half_us = 5;
 
 static void line(uint8_t g, uint8_t high, uint8_t scl) {
     od_write(g, high);
-    sleep_us(5);
+    sleep_us(half_us);
     for (int t = 0; high && g == scl && !gpio_get(scl) && t < 400; t++)
         sleep_us(5);    // clock stretching: up to ~2 ms
 }
@@ -155,6 +161,7 @@ static void i2c_start(uint8_t scl, uint8_t sda) {
 // Write wn bytes, then read rn bytes (repeated start).
 int wz_i2c(uint8_t scl, uint8_t sda, uint8_t addr, const uint8_t *w,
            uint8_t wn, uint8_t *r, uint8_t rn) {
+    half_us = scl == WZ_A ? 25 : 5;     // the bridge: slow, see line()
     for (int i = 0; i < 2; i++) {       // open drain, released
         uint8_t g = i ? sda : scl;
         gpio_init(g);
@@ -162,6 +169,14 @@ int wz_i2c(uint8_t scl, uint8_t sda, uint8_t addr, const uint8_t *w,
         gpio_set_pulls(g, true, false);
         gpio_set_dir(g, false);
     }
+    // a device left holding SDA low (a transfer cut short): clock it out,
+    // then a STOP
+    for (int i = 0; i < 9 && !gpio_get(sda); i++) {
+        line(scl, 0, scl);
+        line(scl, 1, scl);
+    }
+    line(sda, 0, scl);
+    line(sda, 1, scl);
     int res = 0;
     if (wn || !rn) {
         i2c_start(scl, sda);
@@ -285,7 +300,7 @@ int main(void) {
     int n = 0;
     for (;;) {
         if (usb_console_new()) {            // a terminal connected
-            printf("///\r\n");
+            printf("///\r\nWerkzeug firmware " __DATE__ " " __TIME__ "\r\n");
             if (!fs_size) printf("NO ROOM FOR FILES\r\n");
             else if (!mounted) printf("NOT FORMATTED\r\n");
             n = 0;

@@ -29,6 +29,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <unistd.h>
+#include <time.h>
 #include "../../sechs/sechs.h"
 
 /* ---- transport ------------------------------------------------------------ */
@@ -204,7 +205,7 @@ static int bridge_uart(long baud) {
         fprintf(stderr, "the bridge refused %ld baud\n", baud);
         return 1;
     }
-    fprintf(stderr, "UART console at %ld baud; press Enter to wake the "
+    fprintf(stderr, "sechsctl " __DATE__ " " __TIME__ "; UART console at %ld baud; press Enter to wake the "
         "module; Ctrl-C stops a program; end with Ctrl-D\r\n", baud);
     /* A terminal goes raw while relaying: the module echoes (so no local
      * echo), and Ctrl-C reaches it. Ctrl-D ends. */
@@ -382,11 +383,19 @@ static int type(uint8_t addr, const char *s, int len, FILE *out) {
     return 0;
 }
 
-/* wait until the module has been quiet for a while */
+/* wait until the module has printed nothing for 300 ms (a module may
+ * take a moment to start answering: a LOAD, a program that waits) */
+static long now_ms(void) {
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return t.tv_sec * 1000L + t.tv_nsec / 1000000;
+}
+
 static void settle(uint8_t addr, FILE *out) {
-    for (int quiet = 0; quiet < 20; ) {
+    long quiet_since = now_ms();
+    while (now_ms() - quiet_since < 300) {
         bus_idle();
-        quiet = drain(addr, out) > 0 ? 0 : quiet + 1;
+        if (drain(addr, out) > 0) quiet_since = now_ms();
     }
 }
 
@@ -395,7 +404,10 @@ static int send(uint8_t addr, FILE *in) {
     while (fgets(line, sizeof(line), in)) {
         size_t n = strcspn(line, "\r\n");
         line[n++] = '\r';
-        if (type(addr, line, n, stdout)) return 2;
+        if (type(addr, line, n, stdout)) {
+            fprintf(stderr, "the module at 0x%02x stopped answering\n", addr);
+            return 2;
+        }
         settle(addr, stdout);
     }
     int ok = reg1(addr, SR_OK);
@@ -408,11 +420,14 @@ static int send(uint8_t addr, FILE *in) {
 
 static int console(uint8_t addr) {
     char line[256];
-    fprintf(stderr, "console on 0x%02x; end with Ctrl-D\n", addr);
+    fprintf(stderr, "sechsctl " __DATE__ " " __TIME__ "; console on 0x%02x; end with Ctrl-D\n", addr);
     while (fgets(line, sizeof(line), stdin)) {
         size_t n = strcspn(line, "\r\n");
         line[n++] = '\r';
-        if (type(addr, line, n, stdout)) return 2;
+        if (type(addr, line, n, stdout)) {
+            fprintf(stderr, "the module at 0x%02x stopped answering\n", addr);
+            return 2;
+        }
         settle(addr, stdout);
     }
     return 0;
@@ -430,6 +445,7 @@ static long num(const char *s) {
 
 static int usage(void) {
     fprintf(stderr,
+        "sechsctl " __DATE__ " " __TIME__ "\n"
         "usage: sechsctl [-b BUS | -d DEV] scan | info ADDR | halt|run|reset ADDR |\n"
         "                addr ADDR NEW | reg ADDR N [VALUE] | console ADDR |\n"
         "                send ADDR [FILE] | uart BAUD (with -d) |\n"
