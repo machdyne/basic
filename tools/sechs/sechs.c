@@ -192,6 +192,8 @@ static int bridge_flash(const char *path, int force) {
     }
 }
 
+static int uart_relay(int tty);
+
 /* the module's UART console through the bridge, until end of input */
 static int bridge_uart(long baud) {
     char cmd[32], ans[16];
@@ -203,7 +205,28 @@ static int bridge_uart(long baud) {
         return 1;
     }
     fprintf(stderr, "UART console at %ld baud; press Enter to wake the "
-        "module; end with Ctrl-D\n", baud);
+        "module; Ctrl-C stops a program; end with Ctrl-D\r\n", baud);
+    /* A terminal goes raw while relaying: the module echoes (so no local
+     * echo), and Ctrl-C reaches it. Ctrl-D ends. */
+    struct termios saved, raw;
+    int tty = isatty(0) && !tcgetattr(0, &saved);
+    if (tty) {
+        raw = saved;
+        raw.c_lflag &= ~(ICANON | ECHO | ISIG | IEXTEN);
+        raw.c_iflag &= ~(ICRNL | IXON);
+        raw.c_cc[VMIN] = 1;
+        raw.c_cc[VTIME] = 0;
+        tcsetattr(0, TCSANOW, &raw);
+    }
+    int r = uart_relay(tty);
+    if (tty) {
+        tcsetattr(0, TCSANOW, &saved);
+        fprintf(stderr, "\n");
+    }
+    return r;
+}
+
+static int uart_relay(int tty) {
     for (;;) {
         fd_set f;
         FD_ZERO(&f);
@@ -219,7 +242,10 @@ static int bridge_uart(long baud) {
         if (FD_ISSET(0, &f)) {
             ssize_t n = read(0, b, sizeof(b));
             if (n <= 0) return 0;
-            for (ssize_t i = 0; i < n; i++) if (b[i] == '\n') b[i] = '\r';
+            for (ssize_t i = 0; i < n; i++) {
+                if (tty && b[i] == 0x04) return 0;      /* Ctrl-D */
+                if (b[i] == '\n') b[i] = '\r';
+            }
             if (write(fd, b, n) != n) return 1;
         }
     }

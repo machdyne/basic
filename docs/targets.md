@@ -78,6 +78,12 @@ use `PIN` run only on targets with those pins.
 | 9-20 | GPIO header | GPIO0-11 |
 | 21-24 | GPIO header, analog inputs | GPIO26-29 (ADC0-3) |
 
+Werkzeug is the module's carrier: pins 1-4 have the RP2040's internal
+pull-ups whenever Werkzeug does not drive them, from power-on, so the
+module's bus and UART lines never float. (Floating, they picked up the
+UART traffic on pin 3 as I2C writes.) For long wires, add 2.2-4.7k
+pull-ups on pins 1 and 2.
+
 `OD` and `I2C` are emulated open-drain outputs with the internal pull-ups.
 `I2C` is on pins 3 (SCL) and 4 (SDA), bit-banged, about 50 kHz. `ADC` reads
 0-1023 (the 12-bit converter, scaled). `LED` is the green LED.

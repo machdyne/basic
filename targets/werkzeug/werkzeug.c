@@ -69,7 +69,10 @@ int hw_pin_mode(uint8_t pin, uint8_t mode) {
     }
     gpio_init(g);
     gpio_put(g, 0);
-    gpio_set_pulls(g, mode == PM_OD || mode == PM_I2C, false);
+    // pull-ups: open-drain outputs, and the Sechs socket (pins 1-4)
+    // whenever Werkzeug does not drive it: Werkzeug is the carrier, which
+    // must keep the module's bus and UART lines from floating
+    gpio_set_pulls(g, mode == PM_OD || mode == PM_I2C || pin <= 4, false);
     gpio_set_dir(g, mode == PM_PP);
     return 0;
 }
@@ -260,10 +263,14 @@ static void flash_layout(void) {
 int main(void) {
     usb_init();
 
-    for (int i = 0; i < HW_PINS; i++) {     // every BASIC pin an input
-        gpio_init(pin_gpio[i]);
-        gpio_set_pulls(pin_gpio[i], false, false);
+    for (int i = 0; i < HW_PINS; i++) {     // every BASIC pin an input;
+        gpio_init(pin_gpio[i]);             // the Sechs socket pulled up,
+        gpio_set_pulls(pin_gpio[i], i < 4, false);  // so its bus never floats
     }
+    // pins 1/2 are the Sechs bus (NET) from the start: pulled up, so that a
+    // module's I2C target never sees floating lines
+    hw_pin_mode(1, PM_NET);
+    hw_pin_mode(2, PM_NET);
     gpio_init(LED_GREEN);
     gpio_set_dir(LED_GREEN, true);
     gpio_put(LED_GREEN, 1);                 // off (active low)

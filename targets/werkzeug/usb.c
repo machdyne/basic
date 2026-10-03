@@ -162,8 +162,10 @@ int bridge_uart(uint32_t baud) {
 static void uart_stop(void) {
     pio_sm_set_enabled(tx_pio, tx_sm, false);
     uart_deinit(uart0);
-    gpio_init(WZ_C);            /* both pins back to inputs */
+    gpio_init(WZ_C);            /* both pins back to inputs, pulled up */
     gpio_init(WZ_D);
+    gpio_set_pulls(WZ_C, true, false);
+    gpio_set_pulls(WZ_D, true, false);
     uart_baud = 0;
 }
 
