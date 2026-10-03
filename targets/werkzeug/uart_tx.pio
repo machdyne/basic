@@ -1,0 +1,29 @@
+; UART transmitter, 8N1, eight PIO cycles per bit: the bit timing is exact
+; (after the uart_tx program of the Raspberry Pi pico-examples, BSD-3-Clause)
+
+.program uart_tx
+.side_set 1 opt
+    pull       side 1 [7]   ; stop bit (and idle): high
+    set x, 7   side 0 [7]   ; start bit: low
+bitloop:
+    out pins, 1             ; 8 data bits, least significant first
+    jmp x-- bitloop   [6]
+
+% c-sdk {
+#include "hardware/clocks.h"
+
+static inline void uart_tx_program_init(PIO pio, uint sm, uint offset,
+                                        uint pin, uint baud) {
+    pio_sm_set_pins_with_mask(pio, sm, 1u << pin, 1u << pin);
+    pio_sm_set_pindirs_with_mask(pio, sm, 1u << pin, 1u << pin);
+    pio_gpio_init(pio, pin);
+    pio_sm_config c = uart_tx_program_get_default_config(offset);
+    sm_config_set_out_shift(&c, true, false, 32);
+    sm_config_set_out_pins(&c, pin, 1);
+    sm_config_set_sideset_pins(&c, pin);
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
+    sm_config_set_clkdiv(&c, (float)clock_get_hz(clk_sys) / (8.0f * baud));
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_enabled(pio, sm, true);
+}
+%}

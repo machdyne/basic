@@ -2,791 +2,1656 @@
  * Machdyne BASIC
  * Copyright (c) 2025 Lone Dynamics Corporation. All rights reserved.
  *
+ * The interpreter. Targets implement the hw_* functions in basic.h.
  */
 
-#include <stdio.h>
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
-#ifdef TARGET_LINUX
-#include <ctype.h>
-#include <unistd.h>
-#else
-int isalpha(int c);
-int isdigit(int c);
-int toupper(int c);
-#endif
+#include "basic.h"
 
+#define MAX_PROG  1024
+#define MAX_TOK   64    /* tokens per line */
+#define MAX_SRC   100   /* characters per listed line (and LOAD buffer) */
+#define NUM_VARS  26
+#define MAX_FOR   6     /* nested FOR loops */
+#define MAX_GOSUB 8     /* nested GOSUBs */
+#define NUM_REGS  16    /* program registers (Sechs 0x80-0x8F) */
+#define ZONE      14    /* PRINT comma zone width */
 
-#define MAX_PROG 1024
-#define MAX_LINE 64
-#define NUM_VARS 26
-
-void print(uint8_t len, uint8_t *str);
-
-void hw_sleep(uint16_t secs);
-uint8_t hw_peek(uint8_t addr);
-void hw_poke(uint8_t addr, uint8_t val);
-int hw_save(const char *filename, uint8_t *data, uint16_t len);
-int hw_load(const char *filename, uint8_t *data, uint16_t *len, uint16_t max_len);
-
+/* Tokens. Append only: never renumber. */
 enum {
-    TOK_EOL = 0,
-    TOK_LET,
-    TOK_PRINT,
-    TOK_GOTO,
-    TOK_END,
-    TOK_VAR,
-    TOK_NUM,
-    TOK_PLUS,
-    TOK_MINUS,
-    TOK_MUL,
-    TOK_DIV,
-    TOK_EQ,
-    TOK_STR,
-    TOK_IF,
-    TOK_THEN,
-    TOK_ELSE,
-    TOK_LT,
-    TOK_GT,
-    TOK_LE,
-    TOK_GE,
-    TOK_NE,
-    TOK_EQEQ,
-    TOK_INPUT,
-    TOK_PEEK,
-    TOK_POKE,
-    TOK_SLEEP,
-    TOK_LPAREN,
-    TOK_RPAREN,
-    TOK_COMMA
+    TOK_EOL = 0, TOK_LET, TOK_PRINT, TOK_GOTO, TOK_END, TOK_VAR, TOK_NUM,
+    TOK_PLUS, TOK_MINUS, TOK_MUL, TOK_DIV, TOK_EQ, TOK_STR, TOK_IF,
+    TOK_THEN, TOK_ELSE, TOK_LT, TOK_GT, TOK_LE, TOK_GE, TOK_NE, TOK_EQEQ,
+    TOK_INPUT, TOK_PEEK, TOK_POKE, TOK_SLEEP, TOK_LPAREN, TOK_RPAREN,
+    TOK_COMMA, TOK_WAIT,
+    /* Phase 2 */
+    TOK_FOR, TOK_TO, TOK_STEP, TOK_NEXT, TOK_GOSUB, TOK_RETURN, TOK_REM,
+    TOK_MOD, TOK_AND, TOK_OR, TOK_NOT, TOK_SEMI, TOK_COLON, TOK_HASH,
+    TOK_OUT, TOK_IN, TOK_ADC, TOK_LED, TOK_PINS, TOK_I2C, TOK_I2CR,
+    TOK_REG, TOK_STORE, TOK_STORED, TOK_OPEN, TOK_OUTPUT, TOK_APPEND,
+    TOK_AS, TOK_CLOSE, TOK_EOF,
+    TOK_PIN     /* extension: PIN n, mode (targets with more than 4 pins) */
+    /* no longer used: TOK_PEEK, TOK_POKE, TOK_STORE, TOK_STORED */
 };
+
+/* Errors */
+enum {
+    E_NONE = 0, E_SYNTAX, E_LINE_TOO_LONG, E_NUMBER, E_UNDEF_LINE,
+    E_DIV_ZERO, E_MEMORY, E_BAD_NAME, E_NOT_FOUND, E_DISK_FULL,
+    E_DIR_FULL, E_IO, E_NOT_FORMATTED, E_DAMAGED, E_UNSUPPORTED, E_BREAK,
+    E_NEXT, E_RETURN, E_NESTING, E_PIN, E_RANGE, E_FILE_NUM, E_FILE_OPEN,
+    E_FILE_NOT_OPEN, E_EOF, E_I2C, E_BAD_PINS, E_BUS
+};
+
+/* error messages in order, separated by NULs (no pointer table: flash
+ * is scarce on small targets) */
+static const char err_msg[] =
+    "\0SYNTAX ERROR\0TOO LONG\0TOO BIG\0NO LINE\0DIV BY 0\0OUT OF MEMORY\0"
+    "BAD NAME\0NOT FOUND\0DISK FULL\0DIR FULL\0I/O ERROR\0NOT FORMATTED\0"
+    "DAMAGED\0NOT SUPPORTED\0BREAK\0NO FOR\0NO GOSUB\0TOO DEEP\0"
+    "PIN NOT DECLARED\0OUT OF RANGE\0BAD FILE #\0FILE OPEN\0FILE NOT OPEN\0"
+    "END OF FILE\0I2C ERROR\0BAD PINS\0ON A BUS";
+
+/* Keywords in alphabetical order, except that a keyword comes before any
+ * shorter keyword that is a prefix of it (I2CR, INPUT, OUTPUT), so
+ * that the first match is the right one. HELP prints this list. */
+static const char kw_names[] =
+    "ADC AND APPEND AS CLOSE ELSE END EOF FOR GOSUB GOTO I2CR I2C IF "
+    "INPUT IN LED LET MOD NEXT NOT OPEN OR OUTPUT OUT "
+    "PINS "
+#if HW_PINS > 4
+    "PIN "      /* after PINS: words are matched by prefix */
+#endif
+    "PRINT REG REM RETURN SLEEP STEP THEN TO WAIT ";
+static const uint8_t kw_toks[] = {
+    TOK_ADC, TOK_AND, TOK_APPEND, TOK_AS, TOK_CLOSE, TOK_ELSE,
+    TOK_END, TOK_EOF, TOK_FOR, TOK_GOSUB, TOK_GOTO, TOK_I2CR,
+    TOK_I2C, TOK_IF, TOK_INPUT, TOK_IN, TOK_LED, TOK_LET, TOK_MOD,
+    TOK_NEXT, TOK_NOT, TOK_OPEN, TOK_OR, TOK_OUTPUT, TOK_OUT,
+    TOK_PINS,
+#if HW_PINS > 4
+    TOK_PIN,
+#endif
+    TOK_PRINT, TOK_REG, TOK_REM, TOK_RETURN, TOK_SLEEP, TOK_STEP,
+    TOK_THEN, TOK_TO, TOK_WAIT
+};
+
+/* Commands, in the order of the switch in process_command() */
+static const char cmd_names[] = "RUN LIST NEW SAVE LOAD DIR DEL TYPE FORMAT HELP ";
+
+/* pin mode names for PINS, indexed by PM_* */
+/* PINS mode names in PM_* order, separated by spaces */
+const char basic_pin_modes[] = "- IN OD PP AIN I2C UART NET ";
 
 static uint8_t program[MAX_PROG];
 static uint16_t prog_len;
 static int16_t vars[NUM_VARS];
 
-/* Input routing state */
-typedef enum {
-    INPUT_MODE_COMMAND,           // Normal command interface
-    INPUT_MODE_AWAITING_INPUT     // Program is waiting for INPUT statement
-} input_mode_t;
+static uint8_t err;             /* current error, E_NONE if none */
+static uint16_t cur_line;       /* line being run, 0 in immediate mode */
 
-static input_mode_t current_input_mode = INPUT_MODE_COMMAND;
-static uint8_t *execution_pc = NULL;  // Saved program counter during INPUT
+/* the running position: current line and position in it */
+static uint8_t *line_p;
+static uint8_t *ip;
 
-static int16_t expr(uint8_t **pc);
-static void run_from(uint8_t *start_pc);
+/* FOR and GOSUB stacks; positions are offsets into program[] */
+static struct {
+    uint8_t var;
+    int16_t limit, step;
+    uint16_t line, pos;
+} for_stack[MAX_FOR];
+static uint8_t for_sp;
 
-/* ================= INPUT ROUTING ================= */
+static struct {
+    uint16_t line, pos;
+} gosub_stack[MAX_GOSUB];
+static uint8_t gosub_sp;
 
-// Main entry point from ls10.c - routes based on current mode
-void basic_yield(uint8_t *line);
+/* INPUT suspends the program until the next console line */
+static uint8_t awaiting_input;
+static uint8_t input_var;
+static uint16_t resume_line, resume_pos;
+
+static uint8_t pins[HW_PINS];   /* current PM_* mode of each pin */
+uint8_t basic_regs[NUM_REGS];
+uint8_t basic_running, basic_prog_err, basic_cmd_err;
+
+/* the open data file (#1) */
+static uint8_t file_mode;       /* 0, FS_READ, FS_WRITE or FS_APPEND */
+static int16_t file_peek = -1;  /* look-ahead character, -1 if none */
+
+static int16_t expr(void);
+static void run(void);
+
+/* ================= OUTPUT ================= */
+
+/* Output goes to the console, to a file (SAVE, PRINT #), or is only
+ * counted (to measure how long a listed line is). */
+enum { OUT_CONSOLE, OUT_FILE, OUT_COUNT };
+static uint8_t out_mode;
+static uint16_t out_count;
+static uint8_t out_failed;
+static uint8_t col[2];          /* column on the console and in the file */
+
+static void out_char(char c) {
+    if (out_mode == OUT_COUNT) {
+        out_count++;
+        return;
+    }
+    if (out_mode == OUT_CONSOLE) {
+        hw_putc(c);
+    } else if (!out_failed && hw_fwrite((const uint8_t *)&c, 1)) {
+        out_failed = 1;
+    }
+    col[out_mode] = (c == '\n' || c == '\r') ? 0 : col[out_mode] + 1;
+}
+
+static void out_str(const char *s) {
+    while (*s) out_char(*s++);
+}
+
+static void out_unum(uint32_t u) {
+    char buf[11];
+    uint8_t i = 0;
+    do {
+        buf[i++] = '0' + u % 10;
+        u /= 10;
+    } while (u);
+    while (i) out_char(buf[--i]);
+}
+
+static void out_num(int16_t v) {
+    if (v < 0) out_char('-');
+    out_unum(v < 0 ? (uint16_t)(-(int32_t)v) : (uint16_t)v);
+}
+
+static void out_nl(void) {
+    if (out_mode == OUT_CONSOLE) out_char('\r');
+    out_char('\n');
+}
+
+static void report(uint8_t e) {
+    uint8_t m = out_mode;
+    out_mode = OUT_CONSOLE;
+    const char *msg = err_msg;
+    if (col[OUT_CONSOLE]) out_nl();
+    while (e--) msg += strlen(msg) + 1;
+    out_str(msg);
+    if (cur_line) {
+        out_str(" IN ");
+        out_unum(cur_line);
+    }
+    out_nl();
+    out_mode = m;
+}
+
+/* map a file system status to an error */
+static uint8_t fs_err(int r) {
+    switch (r) {
+        case FS_OK: return E_NONE;
+        case FS_ERR_NOT_FOUND: return E_NOT_FOUND;
+        case FS_ERR_FULL: return E_DISK_FULL;
+        case FS_ERR_DIR_FULL: return E_DIR_FULL;
+        case FS_ERR_INVALID: return E_BAD_NAME;
+        case FS_ERR_CORRUPT: return E_DAMAGED;
+        case FS_ERR_UNFORMATTED: return E_NOT_FORMATTED;
+        case HW_ERR_UNSUPPORTED: return E_UNSUPPORTED;
+        case HW_ERR_BUS: return E_BUS;
+        default: return E_IO;
+    }
+}
+
+/* ================= TEXT HELPERS ================= */
+
+static char upper(char c) {
+    return (c >= 'a' && c <= 'z') ? c - 32 : c;
+}
+
+static int is_alpha(char c) {
+    c = upper(c);
+    return c >= 'A' && c <= 'Z';
+}
+
+static int is_digit(char c) {
+    return c >= '0' && c <= '9';
+}
+
+static char *skip_spaces(char *s) {
+    while (*s == ' ' || *s == '\t') s++;
+    return s;
+}
+
+static int at_end(const char *s) {
+    return !*s || *s == '\r' || *s == '\n';
+}
+
+/* Does s start with kw (any case)? */
+static int starts_with(const char *s, const char *kw) {
+    while (*kw) if (upper(*s++) != *kw++) return 0;
+    return 1;
+}
+
+/* File name of len characters: 8.3, any case; ".BAS" if no extension.
+ * out: 13 bytes. */
+static uint8_t file_name(const char *s, uint8_t len, char *out) {
+    uint8_t n = 0, dot = 0, ext = 0;
+    while (len--) {
+        char c = upper(*s++);
+        if (c == '.') {
+            if (dot || n == 0) return E_BAD_NAME;
+            dot = 1;
+        } else if (is_alpha(c) || is_digit(c) || c == '_' || c == '-') {
+            if (dot ? ++ext > 3 : n >= 8) return E_BAD_NAME;
+        } else {
+            return E_BAD_NAME;
+        }
+        out[n++] = c;
+    }
+    if (n == 0) return E_BAD_NAME;
+    if (!dot) {
+        memcpy(out + n, ".BAS", 4);
+        n += 4;
+    }
+    out[n] = 0;
+    return E_NONE;
+}
+
+/* file name argument of a command, followed only by spaces */
+static uint8_t arg_name(char *s, char *out) {
+    uint8_t n = 0;
+    s = skip_spaces(s);
+    while (s[n] > ' ' && n < 13) n++;
+    if (!at_end(skip_spaces(s + n))) return E_BAD_NAME;
+    return file_name(s, n, out);
+}
 
 /* ================= TOKENIZER ================= */
 
-static uint8_t *emit(uint8_t *p, uint8_t v) {
-    *p++ = v;
-    return p;
+/* two-character operators, in pairs, and their tokens (also used by LIST) */
+static const char ops2[] = "<=>=<>==";
+static const uint8_t op2_toks[] = { TOK_LE, TOK_GE, TOK_NE, TOK_EQEQ };
+
+/* one-character operators and their tokens (also used by LIST) */
+static const char ops[] = "+-*/=<>(),;:#";
+static const uint8_t op_toks[] = {
+    TOK_PLUS, TOK_MINUS, TOK_MUL, TOK_DIV, TOK_EQ, TOK_LT, TOK_GT,
+    TOK_LPAREN, TOK_RPAREN, TOK_COMMA, TOK_SEMI, TOK_COLON, TOK_HASH
+};
+
+
+/* Index of the first word in list (words separated by spaces) that s
+ * starts with, in any case, with its length in *len; -1 if none. */
+static int8_t find_word(const char *k, const char *s, uint8_t *len) {
+    for (int8_t i = 0; *k; i++) {
+        uint8_t n = 0;
+        while (k[n] != ' ' && upper(s[n]) == k[n]) n++;
+        if (k[n] == ' ') {
+            *len = n;
+            return i;
+        }
+        while (*k++ != ' ');
+    }
+    return -1;
 }
 
-static uint8_t *emit_num(uint8_t *p, int16_t v) {
-    *p++ = TOK_NUM;
-    *p++ = v & 0xFF;
-    *p++ = v >> 8;
-    return p;
+/* Keyword at s: its token, with its length in *len; 0 if none. */
+static uint8_t find_keyword(const char *s, uint8_t *len) {
+    int8_t i = find_word(kw_names, s, len);
+    return i < 0 ? 0 : kw_toks[i];
 }
 
-static uint8_t *emit_str(uint8_t *p, char *str, int len) {
-    *p++ = TOK_STR;
-    *p++ = len;
-    memcpy(p, str, len);
-    return p + len;
-}
-
+/* Tokenize src into out (MAX_TOK bytes). Returns the length or 0 with
+ * err set. */
 static int tokenize(char *src, uint8_t *out) {
     uint8_t *p = out;
+    uint8_t *end = out + MAX_TOK - 1;   /* room for TOK_EOL */
+    uint8_t last = TOK_EOL;
 
-    while (*src) {
-        while (*src == ' ') src++;
+#define EMIT(v) do { if (p >= end) { err = E_LINE_TOO_LONG; return 0; } \
+                     *p++ = (v); } while (0)
 
+    while (!at_end(src = skip_spaces(src))) {
+        /* GOTO and GOSUB take a constant line number */
+        if ((last == TOK_GOTO || last == TOK_GOSUB) && !is_digit(*src)) {
+            err = E_SYNTAX;
+            return 0;
+        }
         if (*src == '"') {
-            src++;
-            char *start = src;
+            char *s = ++src;
             int len = 0;
-            while (*src && *src != '"') {
+            while (*src != '"' && !at_end(src)) {
                 src++;
                 len++;
             }
-            if (*src == '"') src++;
-            p = emit_str(p, start, len);
-        }
-        else if (isdigit(*src)) {
-            int v = 0;
-            while (isdigit(*src))
-                v = v * 10 + (*src++ - '0');
-            p = emit_num(p, v);
-        }
-        else if (isalpha(*src)) {
-            if (!strncmp(src, "PRINT", 5)) {
-                p = emit(p, TOK_PRINT);
-                src += 5;
-            } else if (!strncmp(src, "INPUT", 5)) {
-                p = emit(p, TOK_INPUT);
-                src += 5;
-            } else if (!strncmp(src, "SLEEP", 5)) {
-                p = emit(p, TOK_SLEEP);
-                src += 5;
-            } else if (!strncmp(src, "THEN", 4)) {
-                p = emit(p, TOK_THEN);
-                src += 4;
-            } else if (!strncmp(src, "ELSE", 4)) {
-                p = emit(p, TOK_ELSE);
-                src += 4;
-            } else if (!strncmp(src, "GOTO", 4)) {
-                p = emit(p, TOK_GOTO);
-                src += 4;
-            } else if (!strncmp(src, "PEEK", 4)) {
-                p = emit(p, TOK_PEEK);
-                src += 4;
-            } else if (!strncmp(src, "POKE", 4)) {
-                p = emit(p, TOK_POKE);
-                src += 4;
-            } else if (!strncmp(src, "LET", 3)) {
-                p = emit(p, TOK_LET);
-                src += 3;
-            } else if (!strncmp(src, "END", 3)) {
-                p = emit(p, TOK_END);
-                src += 3;
-            } else if (!strncmp(src, "IF", 2)) {
-                p = emit(p, TOK_IF);
-                src += 2;
-            } else {
-                p = emit(p, TOK_VAR);
-                p = emit(p, toupper(*src++) - 'A');
+            if (*src != '"') {
+                err = E_SYNTAX;
+                return 0;
             }
+            src++;
+            if (p + 2 + len > end) {
+                err = E_LINE_TOO_LONG;
+                return 0;
+            }
+            *p++ = last = TOK_STR;
+            *p++ = len;
+            memcpy(p, s, len);
+            p += len;
+            continue;
         }
-        else {
-            if (*src == '<' && src[1] == '=') {
-                p = emit(p, TOK_LE);
-                src += 2;
-            } else if (*src == '>' && src[1] == '=') {
-                p = emit(p, TOK_GE);
-                src += 2;
-            } else if (*src == '<' && src[1] == '>') {
-                p = emit(p, TOK_NE);
-                src += 2;
-            } else if (*src == '=' && src[1] == '=') {
-                p = emit(p, TOK_EQEQ);
-                src += 2;
-            } else {
-                switch (*src++) {
-                    case '+': p = emit(p, TOK_PLUS); break;
-                    case '-': p = emit(p, TOK_MINUS); break;
-                    case '*': p = emit(p, TOK_MUL); break;
-                    case '/': p = emit(p, TOK_DIV); break;
-                    case '=': p = emit(p, TOK_EQ); break;
-                    case '<': p = emit(p, TOK_LT); break;
-                    case '>': p = emit(p, TOK_GT); break;
-                    case '(': p = emit(p, TOK_LPAREN); break;
-                    case ')': p = emit(p, TOK_RPAREN); break;
-                    case ',': p = emit(p, TOK_COMMA); break;
+        if (is_digit(*src)) {
+            int32_t v = 0;
+            while (is_digit(*src)) {
+                v = v * 10 + (*src++ - '0');
+                if (v > 32767) {
+                    err = E_NUMBER;
+                    return 0;
                 }
             }
+            EMIT(TOK_NUM);
+            EMIT(v & 0xff);
+            EMIT(v >> 8);
+            last = TOK_NUM;
+            continue;
         }
-    }
+        if (is_alpha(*src)) {
+            uint8_t klen;
+            uint8_t k = find_keyword(src, &klen);
+            if (!k) {
+                /* a variable is a single letter; a letter after it must
+                 * start a keyword */
+                char v = upper(*src++);
+                if (is_alpha(*src) && !find_keyword(src, &klen)) {
+                    err = E_SYNTAX;
+                    return 0;
+                }
+                EMIT(TOK_VAR);
+                EMIT(v - 'A');
+                last = TOK_VAR;
+                continue;
+            }
+            last = k;
+            EMIT(last);
+            src += klen;
+            if (last == TOK_REM) {
+                /* the rest of the line, kept as it is */
+                src = skip_spaces(src);
+                uint8_t len = 0;
+                while (!at_end(src + len)) len++;
+                if (p + 1 + len > end) {
+                    err = E_LINE_TOO_LONG;
+                    return 0;
+                }
+                *p++ = len;
+                memcpy(p, src, len);
+                p += len;
+                break;
+            }
+            if (last == TOK_PINS) {
+                /* four pin modes, stored as PM_* codes */
+                uint8_t m[4];
+                for (uint8_t i = 0; i < 4; i++) {
+                    uint8_t l;
+                    src = skip_spaces(src);
+                    int8_t j = find_word(basic_pin_modes, src, &l);
+                    if (j < 0 || is_alpha(src[l])) {
+                        err = E_BAD_PINS;
+                        return 0;
+                    }
+                    src = skip_spaces(src + l);
+                    if (i < 3 && *src++ != ',') {
+                        err = E_BAD_PINS;
+                        return 0;
+                    }
+                    m[i] = j;
+                }
+                /* modes allowed on A/B and on C/D (bit = PM_*); NET on
+                 * A and B together, I2C and UART on C and D together */
+                if (!((0x8F >> m[0]) & (0x8F >> m[1]) & (0x7F >> m[2]) &
+                      (0x7F >> m[3]) & 1) ||
+                    (m[0] == PM_NET) != (m[1] == PM_NET) ||
+                    (m[2] == PM_I2C) != (m[3] == PM_I2C) ||
+                    (m[2] == PM_UART) != (m[3] == PM_UART)) {
+                    err = E_BAD_PINS;
+                    return 0;
+                }
+                for (uint8_t i = 0; i < 4; i++) EMIT(m[i]);
+            }
+#if HW_PINS > 4
+            if (last == TOK_PIN) {
+                /* extension: PIN n, mode for pins 5 and up; stored as the
+                 * pin number and the PM_* code */
+                uint8_t n = 0, l;
+                src = skip_spaces(src);
+                while (is_digit(*src) && n < 100) n = n * 10 + (*src++ - '0');
+                src = skip_spaces(src);
+                if (n < 5 || n > HW_PINS) {
+                    err = E_RANGE;
+                    return 0;
+                }
+                if (*src++ != ',') {
+                    err = E_BAD_PINS;
+                    return 0;
+                }
+                src = skip_spaces(src);
+                int8_t j = find_word(basic_pin_modes, src, &l);
+                if (j < 0 || j > PM_AIN || is_alpha(src[l])) {
+                    err = E_BAD_PINS;
+                    return 0;
+                }
+                src += l;
+                EMIT(n);
+                EMIT(j);
+            }
+#endif
+            continue;
+        }
 
+        char c = *src++;
+        uint8_t t = 0;
+        for (uint8_t i = 0; i < 4; i++)
+            if (c == ops2[2 * i] && *src == ops2[2 * i + 1]) t = op2_toks[i];
+        if (t) src++;
+        else {
+            uint8_t i = 0;
+            while (ops[i] && ops[i] != c) i++;
+            if (!ops[i]) {
+                err = E_SYNTAX;
+                return 0;
+            }
+            t = op_toks[i];
+        }
+        EMIT(t);
+        last = t;
+    }
+    if (last == TOK_GOTO || last == TOK_GOSUB) {
+        err = E_SYNTAX;
+        return 0;
+    }
     *p++ = TOK_EOL;
     return p - out;
+#undef EMIT
 }
 
-/* ================= EXPRESSIONS ================= */
+/* ================= LIST ================= */
 
-static int16_t factor(uint8_t **pc) {
-    int16_t v = 0;
-
-    if (**pc == TOK_NUM) {
-        (*pc)++;
-        v = (*pc)[0] | ((*pc)[1] << 8);
-        *pc += 2;
-    }
-    else if (**pc == TOK_VAR) {
-        (*pc)++;
-        v = vars[*(*pc)++];
-    }
-    else if (**pc == TOK_STR) {
-        (*pc)++;
-        uint8_t len = *(*pc)++;
-        *pc += len;
-        v = 0;
-    }
-    else if (**pc == TOK_PEEK) {
-        (*pc)++;
-        if (**pc == TOK_LPAREN) (*pc)++;
-        int16_t addr = expr(pc);
-        if (**pc == TOK_RPAREN) (*pc)++;
-        v = hw_peek(addr & 0xff);
-    }
-    else if (**pc == TOK_LPAREN) {
-        (*pc)++;
-        v = expr(pc);
-        if (**pc == TOK_RPAREN) (*pc)++;
-    }
-    return v;
+/* Print word n of a space-separated word list. */
+static void out_word(const char *k, uint8_t n) {
+    while (n--) while (*k++ != ' ');
+    while (*k != ' ') out_char(*k++);
 }
 
-static int16_t term(uint8_t **pc) {
-    int16_t v = factor(pc);
-    while (**pc == TOK_MUL || **pc == TOK_DIV) {
-        uint8_t op = *(*pc)++;
-        int16_t rhs = factor(pc);
-        if (op == TOK_MUL) v *= rhs;
-        else if (rhs) v /= rhs;
-    }
-    return v;
-}
-
-static int16_t expr(uint8_t **pc) {
-    int16_t v = term(pc);
-    while (**pc == TOK_PLUS || **pc == TOK_MINUS) {
-        uint8_t op = *(*pc)++;
-        int16_t rhs = term(pc);
-        if (op == TOK_PLUS) v += rhs;
-        else v -= rhs;
-    }
-    return v;
-}
-
-static int condition(uint8_t **pc) {
-    int16_t lhs = expr(pc);
-    uint8_t op = *(*pc)++;
-    int16_t rhs = expr(pc);
-    
-    switch (op) {
-        case TOK_LT: return lhs < rhs;
-        case TOK_GT: return lhs > rhs;
-        case TOK_LE: return lhs <= rhs;
-        case TOK_GE: return lhs >= rhs;
-        case TOK_NE: return lhs != rhs;
-        case TOK_EQEQ: return lhs == rhs;
-        case TOK_EQ: return lhs == rhs;
+/* Print the keyword for tok; 0 if tok is not a keyword. */
+static uint8_t out_keyword(uint8_t tok) {
+    for (uint8_t i = 0; i < sizeof(kw_toks); i++) {
+        if (kw_toks[i] == tok) {
+            out_word(kw_names, i);
+            return 1;
+        }
     }
     return 0;
 }
 
-/* ================= EXECUTION ================= */
+
+static int is_function(uint8_t t) {
+    return t == TOK_IN || t == TOK_ADC || t == TOK_EOF ||
+        t == TOK_I2CR || t == TOK_REG;
+}
+
+/* One line in its canonical form: tokens separated by single spaces,
+ * except none after "(", "#", a unary minus or a function name before
+ * "(", and none before ")", ",", ";" or ":". */
+static void list_line(uint8_t *p) {
+    uint8_t *q = p + 3;
+    uint8_t space = 1;
+    uint8_t prev = TOK_EOL;
+
+    out_unum(p[0] | (p[1] << 8));
+    while (*q != TOK_EOL) {
+        uint8_t t = *q++;
+        uint8_t unary = t == TOK_MINUS && prev != TOK_NUM &&
+            prev != TOK_VAR && prev != TOK_RPAREN;
+        if (t == TOK_LPAREN && is_function(prev)) space = 0;
+        if (space && t != TOK_RPAREN && t != TOK_COMMA && t != TOK_SEMI &&
+            t != TOK_COLON) out_char(' ');
+        space = 1;
+        prev = t;
+
+        if (t == TOK_NUM) {
+            out_num((int16_t)(q[0] | (q[1] << 8)));
+            q += 2;
+        } else if (t == TOK_VAR) {
+            out_char('A' + *q++);
+        } else if (t == TOK_STR) {
+            uint8_t len = *q++;
+            out_char('"');
+            while (len--) out_char(*q++);
+            out_char('"');
+        } else if (out_keyword(t)) {
+            if (t == TOK_REM) {
+                uint8_t len = *q++;
+                if (len) out_char(' ');
+                while (len--) out_char(*q++);
+            } else if (t == TOK_PINS) {
+                for (uint8_t i = 0; i < 4; i++) {
+                    out_char(i ? ',' : ' ');
+                    out_word(basic_pin_modes, *q++);
+                }
+            }
+#if HW_PINS > 4
+            else if (t == TOK_PIN) {
+                out_char(' ');
+                out_unum(*q++);
+                out_char(',');
+                out_word(basic_pin_modes, *q++);
+            }
+#endif
+        } else {
+            for (uint8_t i = 0; i < sizeof(op_toks); i++)
+                if (op_toks[i] == t) out_char(ops[i]);
+            for (uint8_t i = 0; i < 4; i++) {
+                if (op2_toks[i] == t) {
+                    out_char(ops2[2 * i]);
+                    out_char(ops2[2 * i + 1]);
+                }
+            }
+            if (t == TOK_LPAREN || t == TOK_HASH || unary) space = 0;
+        }
+    }
+    out_nl();
+}
+
+static void list_program(void) {
+    uint8_t *p = program;
+    while (p < program + prog_len && !out_failed) {
+        list_line(p);
+        p += 3 + p[2];
+    }
+}
+
+/* ================= PROGRAM STORE ================= */
 
 static uint8_t *find_line(uint16_t line) {
     uint8_t *p = program;
     while (p < program + prog_len) {
-        uint16_t ln = p[0] | (p[1] << 8);
-        if (ln == line) return p;
+        if ((p[0] | (p[1] << 8)) == line) return p;
         p += 3 + p[2];
     }
     return NULL;
 }
 
 static void delete_line(uint16_t ln) {
-    uint8_t *p = program;
-
-    while (p < program + prog_len) {
-        uint16_t cur = p[0] | (p[1] << 8);
-        uint8_t len = p[2];
-        uint16_t total = 3 + len;
-
-        if (cur == ln) {
-            memmove(p, p + total,
-                    (program + prog_len) - (p + total));
-            prog_len -= total;
-            return;
-        }
-        p += total;
-    }
+    uint8_t *p = find_line(ln);
+    if (!p) return;
+    uint16_t total = 3 + p[2];
+    memmove(p, p + total, (program + prog_len) - (p + total));
+    prog_len -= total;
 }
 
 static void insert_line(uint16_t ln, uint8_t *buf, int len) {
     uint8_t *p = program;
-    
-    // Find insertion point
-    while (p < program + prog_len) {
-        uint16_t cur = p[0] | (p[1] << 8);
-        if (cur > ln) break;
+
+    if (prog_len + 3 + len > MAX_PROG) {
+        err = E_MEMORY;
+        return;
+    }
+    while (p < program + prog_len && (p[0] | (p[1] << 8)) < ln)
         p += 3 + p[2];
-    }
-    
-    // Make space
-    if (p < program + prog_len) {
-        memmove(p + 3 + len, p, (program + prog_len) - p);
-    }
-    
-    // Insert new line
-    *p++ = ln & 0xFF;
-    *p++ = ln >> 8;
-    *p++ = len;
-    memcpy(p, buf, len);
-    
+    memmove(p + 3 + len, p, (program + prog_len) - p);
+    p[0] = ln & 0xFF;
+    p[1] = ln >> 8;
+    p[2] = len;
+    memcpy(p + 3, buf, len);
     prog_len += 3 + len;
 }
 
-// Handler for INPUT statement response
-static uint8_t current_input_var = 0;
+/* A numbered line typed or loaded: replace, add or delete it. */
+static void enter_line(char *line) {
+    uint8_t tmp[3 + MAX_TOK];
+    int32_t ln = 0;
 
-static void handle_input_response(uint8_t *line) {
-    // Parse the input value
-    int val = atoi((char*)line);
-    vars[current_input_var] = val;
-    
-    // Resume execution from where we left off
-    if (execution_pc) {
-        run_from(execution_pc);
-        execution_pc = NULL;
+    while (is_digit(*line)) {
+        ln = ln * 10 + (*line++ - '0');
+        if (ln > 32767) break;
+    }
+    if (ln < 1 || ln > 32767) {
+        err = E_NUMBER;
+        return;
+    }
+    line = skip_spaces(line);
+    if (at_end(line)) {
+        delete_line(ln);
+        return;
+    }
+    int len = tokenize(line, tmp + 3);
+    if (!len) return;
+
+    /* every stored line must fit LOAD's buffer when listed */
+    tmp[0] = ln & 0xff;
+    tmp[1] = ln >> 8;
+    tmp[2] = len;
+    uint8_t m = out_mode;
+    out_mode = OUT_COUNT;
+    out_count = 0;
+    list_line(tmp);
+    out_mode = m;
+    if (out_count > MAX_SRC) {
+        err = E_LINE_TOO_LONG;
+        return;
+    }
+
+    delete_line(ln);
+    insert_line(ln, tmp + 3, len);
+}
+
+/* ================= FILES (#1) ================= */
+
+static void file_close(void) {
+    if (!file_mode) return;
+    file_mode = 0;
+    file_peek = -1;
+    if (!err) err = fs_err(hw_fclose());
+    else hw_fclose();
+}
+
+/* "#n," in PRINT # and INPUT #: only file 1, open in the right mode */
+static void file_number(uint8_t reading) {
+    ip++;
+    if (expr() != 1) {
+        if (!err) err = E_FILE_NUM;
+        return;
+    }
+    if (*ip++ != TOK_COMMA) err = E_SYNTAX;
+    else if (!file_mode || (file_mode == FS_READ) != reading)
+        err = E_FILE_NOT_OPEN;
+}
+
+/* next character of the file, -1 at the end */
+static int16_t file_getc(void) {
+    uint8_t c;
+    if (file_peek >= 0) {
+        int16_t r = file_peek;
+        file_peek = -1;
+        return r;
+    }
+    int r = hw_fread(&c, 1);
+    if (r < 0) err = fs_err(r);
+    return r == 1 ? c : -1;
+}
+
+static int16_t file_ungetc(int16_t c) {
+    return file_peek = c;
+}
+
+static int file_eof(void) {
+    return file_ungetc(file_getc()) < 0;
+}
+
+/* INPUT #: the next number, then one separator */
+static int16_t file_number_value(void) {
+    int16_t c;
+    int32_t v = 0;
+    uint8_t neg = 0, digits = 0;
+    do {
+        c = file_getc();
+    } while (c == ' ' || c == '\r' || c == '\n' || c == ',');
+    if (c < 0) {
+        if (!err) err = E_EOF;
+        return 0;
+    }
+    if (c == '-') {
+        neg = 1;
+        c = file_getc();
+    }
+    while (c >= '0' && c <= '9') {
+        v = v * 10 + (c - '0');
+        if (v > 32768) v = 32768;
+        digits++;
+        c = file_getc();
+    }
+    while (c == ' ' || c == '\r') c = file_getc();
+    if (c != ',' && c != '\n') file_ungetc(c);
+    if (!digits || v > 32767 + neg) {
+        err = E_SYNTAX;
+        return 0;
+    }
+    return (int16_t)(neg ? -v : v);
+}
+
+/* ================= EXPRESSIONS ================= */
+
+/* "(" expr { "," expr } ")" for functions; returns the number of
+ * arguments, reading at most max into a */
+static uint8_t args(int16_t *a, uint8_t max) {
+    uint8_t n = 0;
+    if (*ip++ != TOK_LPAREN) {
+        err = E_SYNTAX;
+        return 0;
+    }
+    for (;;) {
+        int16_t v = expr();
+        if (n < max) a[n] = v;
+        n++;
+        if (err || *ip != TOK_COMMA) break;
+        ip++;
+    }
+    if (*ip++ != TOK_RPAREN) err = E_SYNTAX;
+    return n;
+}
+
+static int8_t pin_arg(int16_t p) {
+    if (p < 1 || p > HW_PINS) {
+        err = E_RANGE;
+        return -1;
+    }
+    return p - 1;
+}
+
+static uint8_t i2c_ready(void) {
+    if (pins[2] != PM_I2C) err = E_PIN;
+    return !err;
+}
+
+static int16_t factor(void) {
+    int16_t v = 0, a[2];
+    int8_t p = 0;
+    uint8_t t = *ip++;
+
+    /* functions with one argument: parse it first */
+    if (t == TOK_IN || t == TOK_ADC || t == TOK_EOF || t == TOK_REG) {
+        if (args(a, 1) != 1 && !err) err = E_SYNTAX;
+        if (err) return 0;
+        if (t == TOK_IN || t == TOK_ADC) {
+            if ((p = pin_arg(a[0])) < 0) return 0;
+        }
+    }
+
+    switch (t) {
+        case TOK_NUM:
+            v = ip[0] | (ip[1] << 8);
+            ip += 2;
+            break;
+        case TOK_VAR:
+            v = vars[*ip++];
+            break;
+        case TOK_MINUS:
+            v = -factor();
+            break;
+        case TOK_LPAREN:
+            v = expr();
+            if (*ip++ != TOK_RPAREN) err = E_SYNTAX;
+            break;
+        case TOK_IN:
+            if (pins[p] == PM_NONE || (pins[p] >= PM_AIN && pins[p] != PM_NET))
+                err = E_PIN;
+            else v = hw_pin_read(p + 1) ? 1 : 0;
+            break;
+        case TOK_ADC:
+            if (pins[p] != PM_AIN) err = E_PIN;
+            else if ((v = hw_adc(p + 1)) < 0) err = E_UNSUPPORTED;
+            break;
+        case TOK_EOF:
+            if (a[0] != 1) err = E_FILE_NUM;
+            else if (file_mode != FS_READ) err = E_FILE_NOT_OPEN;
+            else v = file_eof() ? -1 : 0;
+            break;
+        case TOK_I2CR: {
+            uint8_t n = args(a, 2), w, r;
+            if ((n < 1 || n > 2) && !err) err = E_SYNTAX;
+            if (err || !i2c_ready()) break;
+            w = a[1];
+            v = hw_i2c(a[0], &w, n - 1, &r, 1) ? -1 : r;
+            break;
+        }
+        case TOK_REG:
+            if (a[0] < 0 || a[0] >= NUM_REGS) err = E_RANGE;
+            else v = basic_regs[a[0]];
+            break;
+        default:
+            ip--;
+            err = E_SYNTAX;
+    }
+    return v;
+}
+
+static int16_t term(void) {
+    int16_t v = factor();
+    while (*ip == TOK_MUL || *ip == TOK_DIV || *ip == TOK_MOD) {
+        uint8_t op = *ip++;
+        int16_t rhs = factor();
+        if (op == TOK_MUL) v *= rhs;
+        else if (rhs == 0) err = E_DIV_ZERO;
+        else if (op == TOK_DIV) v /= rhs;
+        else v %= rhs;
+    }
+    return v;
+}
+
+static int16_t sum(void) {
+    int16_t v = term();
+    while (*ip == TOK_PLUS || *ip == TOK_MINUS) {
+        uint8_t op = *ip++;
+        int16_t rhs = term();
+        v = op == TOK_PLUS ? v + rhs : v - rhs;
+    }
+    return v;
+}
+
+/* one comparison; true is -1 */
+static int16_t compare(void) {
+    int16_t lhs = sum();
+    uint8_t op = *ip;
+    if (op != TOK_EQ && op != TOK_EQEQ && op != TOK_NE && op != TOK_LT &&
+        op != TOK_GT && op != TOK_LE && op != TOK_GE) return lhs;
+    ip++;
+    int16_t rhs = sum();
+    uint8_t r;
+    switch (op) {
+        case TOK_LT: r = lhs < rhs; break;
+        case TOK_GT: r = lhs > rhs; break;
+        case TOK_LE: r = lhs <= rhs; break;
+        case TOK_GE: r = lhs >= rhs; break;
+        case TOK_NE: r = lhs != rhs; break;
+        default: r = lhs == rhs;
+    }
+    return r ? -1 : 0;
+}
+
+/* NOT is below comparisons: NOT A = B means NOT (A = B) */
+static int16_t negation(void) {
+    if (*ip != TOK_NOT) return compare();
+    ip++;
+    return ~negation();
+}
+
+static int16_t conjunction(void) {
+    int16_t v = negation();
+    while (*ip == TOK_AND) {
+        ip++;
+        v &= negation();
+    }
+    return v;
+}
+
+static int16_t expr(void) {
+    int16_t v = conjunction();
+    while (*ip == TOK_OR) {
+        ip++;
+        v |= conjunction();
+    }
+    return v;
+}
+
+/* ================= TIME ================= */
+
+/* Wait in short steps so that Ctrl-C (and later Sechs HALT) is seen. */
+static void wait_ms(int32_t ms) {
+    while (ms > 0 && !err) {
+        uint16_t n = ms > 100 ? 100 : (uint16_t)ms;
+        hw_delay_ms(n);
+        ms -= n;
+        if (hw_break()) err = E_BREAK;
     }
 }
 
-static void request_input(void) {
-    current_input_mode = INPUT_MODE_AWAITING_INPUT;
-    printf("? ");
-#ifdef TARGET_LINUX
-    fflush(stdout);
+/* ================= STATEMENTS ================= */
+
+static uint8_t expect(uint8_t t) {
+    if (*ip != t) {
+        err = E_SYNTAX;
+        return 0;
+    }
+    ip++;
+    return 1;
+}
+
+/* end of a statement: end of line, ":" or ELSE */
+static int stmt_end(void) {
+    return *ip == TOK_EOL || *ip == TOK_COLON || *ip == TOK_ELSE;
+}
+
+/* Skip one token and its data. */
+static void skip_token(uint8_t **q) {
+    uint8_t t = *(*q)++;
+    if (t == TOK_NUM) *q += 2;
+    else if (t == TOK_VAR) *q += 1;
+    else if (t == TOK_STR || t == TOK_REM) *q += 1 + **q;
+    else if (t == TOK_PINS) *q += 4;
+#if HW_PINS > 4
+    else if (t == TOK_PIN) *q += 2;
 #endif
 }
 
-/* ================= CONSOLIDATED STATEMENT EXECUTION ================= */
+static void jump(uint8_t *line, uint8_t *pos) {
+    line_p = line;
+    ip = pos ? pos : line + 3;
+}
 
-// Return values:
-//   1: Continue normally
-//   0: PC was changed (GOTO), don't advance
-//  -1: Stop execution (END or INPUT waiting)
-static int execute_statement(uint8_t **ip, uint8_t **pc) {
-    uint8_t tok = *(*ip)++;
-    
-    switch (tok) {
-        case TOK_LET:
-            if (*(*ip)++ == TOK_VAR) {
-                uint8_t v = *(*ip)++;
-                if (*(*ip) == TOK_EQ) (*ip)++;
-                vars[v] = expr(ip);
-            }
-            break;
-            
-        case TOK_POKE: {
-            int16_t addr = expr(ip);
-            if (*(*ip) == TOK_COMMA) (*ip)++;
-            int16_t val = expr(ip);
-            hw_poke(addr & 0xff, val & 0xff);
-            break;
-        }
-            
-        case TOK_SLEEP: {
-            int16_t seconds = expr(ip);
-            if (seconds > 0) {
-                hw_sleep(seconds);
-            }
-            break;
-        }
-            
-        case TOK_PRINT:
-            if (*(*ip) == TOK_STR) {
-                (*ip)++;
-                uint8_t len = *(*ip)++;
-                print(len, (uint8_t*)*ip);
-                printf("\r\n");
-                *ip += len;
-            } else {
-                printf("%d\r\n", expr(ip));
-            }
-            break;
-            
-        case TOK_GOTO: {
-            uint8_t *new_pc = find_line(expr(ip));
-            if (new_pc && pc) {
-                *pc = new_pc;
-                return 0; // Don't advance pc
-            }
-            break;
-        }
-            
-        case TOK_INPUT: {
-            if (*(*ip) == TOK_STR) {
-                (*ip)++;
-                uint8_t len = *(*ip)++;
-                print(len, (uint8_t*)*ip);
-                *ip += len;
-                if (*(*ip) == TOK_COMMA) (*ip)++;
-            }
-            if (*(*ip) == TOK_VAR) {
-                (*ip)++;
-                current_input_var = *(*ip)++;
-                
-                // Save execution state and request input
-                if (pc) {
-                    execution_pc = *pc + 3 + (*pc)[2];  // Next line
-                }
-                request_input();
-                return -1; // Stop execution to wait for input
-            }
-            break;
-        }
-            
-        case TOK_END:
-            return -1; // Stop execution
-            
-        default:
-            // Unknown token, skip it
-            break;
+/* GOTO or GOSUB to the line number at ip */
+static int go(uint8_t sub) {
+    uint16_t ln = ip[1] | (ip[2] << 8);
+    uint8_t *target = find_line(ln);
+    ip += 3;
+    if (!stmt_end()) err = E_SYNTAX;
+    else if (!target) err = E_UNDEF_LINE;
+    else if (sub && gosub_sp == MAX_GOSUB) err = E_NESTING;
+    if (err) return -1;
+    if (sub) {
+        gosub_stack[gosub_sp].line = line_p - program;
+        gosub_stack[gosub_sp++].pos = ip - program;
     }
-    
-    return 1; // Continue normally
+    jump(target, NULL);
+    return 1;
+}
+
+static void do_print(void) {
+    uint8_t newline = 1;
+
+    if (*ip == TOK_HASH) {
+        file_number(0);
+        if (err) return;
+        out_mode = OUT_FILE;
+        out_failed = 0;
+    }
+    while (!err && !stmt_end()) {
+        if (*ip == TOK_SEMI || *ip == TOK_COMMA) {
+            if (*ip++ == TOK_COMMA)
+                do out_char(' '); while (col[out_mode] % ZONE);
+            newline = 0;
+            continue;
+        }
+        if (*ip == TOK_STR) {
+            uint8_t len = *++ip;
+            ip++;
+            while (len--) out_char(*ip++);
+        } else {
+            int16_t v = expr();
+            if (!err) out_num(v);
+        }
+        newline = 1;
+    }
+    if (!err && newline) out_nl();
+    if (out_mode == OUT_FILE && out_failed && !err) err = E_DISK_FULL;
+    out_mode = OUT_CONSOLE;
+}
+
+static void do_open(void) {
+    char name[13];
+    uint8_t mode;
+    if (*ip++ != TOK_STR) {
+        err = E_SYNTAX;
+        return;
+    }
+    uint8_t len = *ip++;
+    const char *s = (const char *)ip;
+    ip += len;
+    if (!expect(TOK_FOR)) return;
+    if (*ip == TOK_INPUT) mode = FS_READ;
+    else if (*ip == TOK_OUTPUT) mode = FS_WRITE;
+    else if (*ip == TOK_APPEND) mode = FS_APPEND;
+    else {
+        err = E_SYNTAX;
+        return;
+    }
+    ip++;
+    if (!expect(TOK_AS)) return;
+    if (*ip == TOK_HASH) ip++;
+    if (expr() != 1) {
+        if (!err) err = E_FILE_NUM;
+        return;
+    }
+    if (file_mode) {
+        err = E_FILE_OPEN;
+        return;
+    }
+    if ((err = file_name(s, len, name))) return;
+    if ((err = fs_err(hw_fopen(name, mode)))) return;
+    file_mode = mode;
+    file_peek = -1;
+}
+
+/* "a, b", or "(a, b)" when parenthesized */
+static void two_args(int16_t *a) {
+    if (*ip == TOK_LPAREN) {
+        if (args(a, 2) != 2 && !err) err = E_SYNTAX;
+        return;
+    }
+    a[0] = expr();
+    if (expect(TOK_COMMA)) a[1] = expr();
+}
+
+static int set_pins(const uint8_t *m) {
+    int r = 0;
+    for (uint8_t i = 0; i < 4; i++) {
+        int e = hw_pin_mode(i + 1, m[i]);
+        if (e) r = e;
+        else pins[i] = m[i];
+    }
+    return r;
+}
+
+/* Run one statement at ip. Returns 0 to continue with the next
+ * statement, 1 if the position was changed (jump), -1 to stop. */
+static int statement(void) {
+    uint8_t tok = *ip++;
+    int16_t a, b, ab[2];
+    int8_t p;
+
+    switch (tok) {
+        case TOK_COLON:
+            return 0;
+
+        case TOK_REM:
+            ip += 1 + *ip;
+            break;
+
+        case TOK_ELSE:
+            /* reached the end of a THEN part: skip the ELSE part */
+            while (*ip != TOK_EOL) skip_token(&ip);
+            break;
+
+        case TOK_LET:
+            if (*ip++ != TOK_VAR) {
+                err = E_SYNTAX;
+                break;
+            }
+            /* fall through */
+        case TOK_VAR: {
+            uint8_t v = *ip++;
+            if (!expect(TOK_EQ)) break;
+            a = expr();
+            if (!err) vars[v] = a;
+            break;
+        }
+
+        case TOK_IF: {
+            a = expr();
+            if (err) break;
+            if (*ip == TOK_THEN) ip++;
+            if (!a) {
+                /* skip to the ELSE that belongs to this IF */
+                int depth = 0;
+                while (*ip != TOK_EOL) {
+                    if (*ip == TOK_IF) depth++;
+                    else if (*ip == TOK_ELSE && depth-- == 0) {
+                        ip++;
+                        break;
+                    }
+                    skip_token(&ip);
+                }
+            }
+            /* THEN 100 and ELSE 100 mean GOTO 100 */
+            if (*ip == TOK_NUM) return go(0);
+            return 0;   /* ip is at the start of the next statement */
+        }
+
+        case TOK_PRINT:
+            do_print();
+            break;
+
+        case TOK_INPUT:
+            if (*ip == TOK_HASH) {
+                file_number(1);
+                if (err) break;
+                if (*ip++ != TOK_VAR) {
+                    err = E_SYNTAX;
+                    break;
+                }
+                uint8_t v = *ip++;
+                a = file_number_value();
+                if (!err) vars[v] = a;
+                break;
+            }
+            if (*ip == TOK_STR) {
+                uint8_t len = *++ip;
+                ip++;
+                while (len--) out_char(*ip++);
+                if (*ip == TOK_COMMA || *ip == TOK_SEMI) ip++;
+            }
+            if (*ip++ != TOK_VAR) {
+                err = E_SYNTAX;
+                break;
+            }
+            input_var = *ip++;
+            resume_line = line_p - program;
+            resume_pos = ip - program;
+            awaiting_input = 1;
+            out_str("? ");
+            return -1;
+
+        case TOK_GOTO:
+            return go(0);
+
+        case TOK_GOSUB:
+            return go(1);
+
+        case TOK_RETURN:
+            if (!gosub_sp) {
+                err = E_RETURN;
+                break;
+            }
+            gosub_sp--;
+            jump(program + gosub_stack[gosub_sp].line,
+                program + gosub_stack[gosub_sp].pos);
+            return 1;
+
+        case TOK_FOR: {
+            if (*ip++ != TOK_VAR) {
+                err = E_SYNTAX;
+                break;
+            }
+            uint8_t v = *ip++;
+            if (!expect(TOK_EQ)) break;
+            a = expr();
+            if (!expect(TOK_TO)) break;
+            b = expr();
+            int16_t step = 1;
+            if (*ip == TOK_STEP) {
+                ip++;
+                step = expr();
+            }
+            if (err) break;
+            vars[v] = a;
+            /* a loop on the same variable replaces it and those inside */
+            for (uint8_t i = 0; i < for_sp; i++) {
+                if (for_stack[i].var == v) {
+                    for_sp = i;
+                    break;
+                }
+            }
+            if (for_sp == MAX_FOR) {
+                err = E_NESTING;
+                break;
+            }
+            for_stack[for_sp].var = v;
+            for_stack[for_sp].limit = b;
+            for_stack[for_sp].step = step;
+            for_stack[for_sp].line = line_p - program;
+            for_stack[for_sp++].pos = ip - program;
+            break;
+        }
+
+        case TOK_NEXT: {
+            if (*ip == TOK_VAR) {
+                uint8_t v = ip[1];
+                ip += 2;
+                while (for_sp && for_stack[for_sp - 1].var != v) for_sp--;
+            }
+            if (!for_sp) {
+                err = E_NEXT;
+                break;
+            }
+            uint8_t i = for_sp - 1;
+            int32_t nv = (int32_t)vars[for_stack[i].var] + for_stack[i].step;
+            if (for_stack[i].step >= 0 ? nv > for_stack[i].limit
+                                       : nv < for_stack[i].limit) {
+                for_sp--;
+                break;
+            }
+            vars[for_stack[i].var] = (int16_t)nv;
+            jump(program + for_stack[i].line, program + for_stack[i].pos);
+            return 1;
+        }
+
+        case TOK_END:
+            return -1;
+
+
+        case TOK_SLEEP:
+            wait_ms((int32_t)expr() * 1000);
+            break;
+
+        case TOK_WAIT:
+            wait_ms(expr());
+            break;
+
+        case TOK_PINS:
+            err = fs_err(set_pins(ip));
+            ip += 4;
+            break;
+#if HW_PINS > 4
+        case TOK_PIN: {
+            int e = hw_pin_mode(ip[0], ip[1]);
+            if (e) err = fs_err(e);
+            else pins[ip[0] - 1] = ip[1];
+            ip += 2;
+            break;
+        }
+#endif
+
+        case TOK_OUT:
+            two_args(ab);
+            if (err || (p = pin_arg(ab[0])) < 0) break;
+            if (pins[p] != PM_OD && pins[p] != PM_PP) err = E_PIN;
+            else hw_pin_write(p + 1, ab[1] != 0);
+            break;
+
+        case TOK_LED:
+            a = expr();
+            if (!err) hw_led(a != 0);
+            break;
+
+        case TOK_I2C: {
+            uint8_t w[2], n = 0;
+            a = expr();
+            while (!err && *ip == TOK_COMMA && n < 2) {
+                ip++;
+                w[n++] = expr();
+            }
+            if (!n || !stmt_end()) err = E_SYNTAX;
+            if (!err && i2c_ready() && hw_i2c(a, w, n, NULL, 0))
+                err = E_I2C;
+            break;
+        }
+
+        case TOK_REG:
+            two_args(ab);
+            if (err) break;
+            if (ab[0] < 0 || ab[0] >= NUM_REGS) err = E_RANGE;
+            else basic_regs[ab[0]] = ab[1];
+            break;
+
+        case TOK_OPEN:
+            do_open();
+            break;
+
+        case TOK_CLOSE:
+            if (*ip == TOK_HASH) ip++;
+            if (expr() != 1) {
+                if (!err) err = E_FILE_NUM;
+                break;
+            }
+            if (!file_mode) err = E_FILE_NOT_OPEN;
+            else file_close();
+            break;
+
+        default:
+            ip--;
+            err = E_SYNTAX;
+    }
+
+    if (!err && !stmt_end()) err = E_SYNTAX;
+    return err ? -1 : 0;
 }
 
 /* ================= MAIN EXECUTION LOOP ================= */
 
-static void run_from(uint8_t *start_pc) {
-    uint8_t *pc = start_pc;
-
-    while (pc < program + prog_len) {
-        uint8_t *ip = pc + 3;
-        int should_advance = 1;
-
-        while (*ip != TOK_EOL) {
-            uint8_t tok = *ip;
-            
-            if (tok == TOK_IF) {
-                ip++;
-                int cond = condition(&ip);
-                if (*ip == TOK_THEN) ip++;
-                
-                if (cond) {
-                    // Execute the THEN part
-                    uint8_t *else_pos = ip;
-                    int depth = 0;
-                    
-                    // Find ELSE at same depth
-                    while (*else_pos != TOK_EOL) {
-                        if (*else_pos == TOK_IF) depth++;
-                        else if (*else_pos == TOK_ELSE && depth == 0) break;
-                        else if (*else_pos == TOK_NUM) else_pos += 2;
-                        else if (*else_pos == TOK_STR) {
-                            else_pos++;
-                            else_pos += *else_pos + 1;
-                            continue;
-                        }
-                        else if (*else_pos == TOK_VAR) else_pos++;
-                        else_pos++;
-                    }
-                    
-                    // Execute THEN clause
-                    while (ip < else_pos && *ip != TOK_EOL) {
-                        int result = execute_statement(&ip, &pc);
-                        if (result == 0) {
-                            should_advance = 0;
-                            break;
-                        } else if (result == -1) {
-                            return;
-                        }
-                    }
-                } else {
-                    // Skip to ELSE or EOL
-                    int depth = 0;
-                    while (*ip != TOK_EOL) {
-                        if (*ip == TOK_IF) depth++;
-                        else if (*ip == TOK_ELSE && depth == 0) {
-                            ip++;
-                            break;
-                        }
-                        if (*ip == TOK_NUM) ip += 2;
-                        else if (*ip == TOK_STR) {
-                            ip++;
-                            ip += *ip + 1;
-                            continue;
-                        }
-                        else if (*ip == TOK_VAR) ip++;
-                        ip++;
-                    }
-                    
-                    // Execute ELSE clause
-                    while (*ip != TOK_EOL) {
-                        int result = execute_statement(&ip, &pc);
-                        if (result == 0) {
-                            should_advance = 0;
-                            break;
-                        } else if (result == -1) {
-                            return;
-                        }
-                    }
-                }
-                break;
-            } else {
-                // Execute regular statement
-                int result = execute_statement(&ip, &pc);
-                if (result == 0) {
-                    should_advance = 0;
-                    break;
-                } else if (result == -1) {
-                    return;
-                }
-            }
-        }
-        
-        if (should_advance) {
-            pc += 3 + pc[2];
-        }
-    }
-}
-
+/* Run from line_p/ip until the end, END, INPUT or an error. */
 static void run(void) {
-    run_from(program);
-}
-
-/* ================= LIST ================= */
-
-void print(uint8_t len, uint8_t *str) {
-
-	for (uint8_t i = 0; i < len; i++ ) {
-		putchar(str[i]);
-	}
-
-}
-
-static void print_token(uint8_t **ip) {
-    switch (*(*ip)++) {
-        case TOK_LET:   printf("LET "); break;
-        case TOK_PRINT: printf("PRINT "); break;
-        case TOK_INPUT: printf("INPUT "); break;
-        case TOK_GOTO:  printf("GOTO "); break;
-        case TOK_END:   printf("END"); break;
-        case TOK_IF:    printf("IF "); break;
-        case TOK_THEN:  printf("THEN "); break;
-        case TOK_ELSE:  printf("ELSE "); break;
-        case TOK_PEEK:  printf("PEEK"); break;
-        case TOK_POKE:  printf("POKE "); break;
-        case TOK_SLEEP: printf("SLEEP "); break;
-
-        case TOK_VAR:
-            printf("%c", 'A' + *(*ip)++);
-            break;
-
-        case TOK_NUM: {
-            int16_t v = (*ip)[0] | ((*ip)[1] << 8);
-            *ip += 2;
-            printf("%d", v);
-            break;
+    basic_running = 1;
+    basic_prog_err = 0;
+    while (line_p < program + prog_len) {
+        cur_line = line_p[0] | (line_p[1] << 8);
+        if (hw_break()) err = E_BREAK;
+        while (!err && *ip != TOK_EOL) {
+            int r = statement();
+            if (r < 0) goto stop;
+            if (r > 0) goto next;
         }
-
-        case TOK_STR: {
-            uint8_t len = *(*ip)++;
-            putchar('\"');
-            print(len, (uint8_t*)*ip);
-            putchar('\"');
-            *ip += len;
-            break;
-        }
-
-        case TOK_PLUS:  printf(" + "); break;
-        case TOK_MINUS: printf(" - "); break;
-        case TOK_MUL:   printf(" * "); break;
-        case TOK_DIV:   printf(" / "); break;
-        case TOK_EQ:    printf(" = "); break;
-        case TOK_LT:    printf(" < "); break;
-        case TOK_GT:    printf(" > "); break;
-        case TOK_LE:    printf(" <= "); break;
-        case TOK_GE:    printf(" >= "); break;
-        case TOK_NE:    printf(" <> "); break;
-        case TOK_EQEQ:  printf(" == "); break;
-        case TOK_LPAREN: printf("("); break;
-        case TOK_RPAREN: printf(")"); break;
-        case TOK_COMMA:  printf(", "); break;
-
-        case TOK_EOL:
-            break;
+        if (err) break;
+        jump(line_p + 3 + line_p[2], NULL);
+    next:;
     }
+stop:
+    basic_running = 0;
+    basic_prog_err = err;
+    if (err) report(err);
+    if (!awaiting_input) {
+        err = E_NONE;
+        file_close();       /* a program's file is closed when it stops */
+        if (err) report(err);
+    }
+    err = E_NONE;
+    cur_line = 0;
 }
 
-static void list_program(void) {
-    uint8_t *p = program;
-
-    while (p < program + prog_len) {
-        uint16_t ln = p[0] | (p[1] << 8);
-        uint8_t len = p[2];
-        uint8_t *ip = p + 3;
-
-        printf("%u ", ln);
-        while (*ip != TOK_EOL)
-            print_token(&ip);
-        printf("\r\n");
-
-        p += 3 + len;
+static void clear(void) {
+    static const uint8_t default_pins[4] = { PM_NET, PM_NET, 0, 0 };
+    memset(vars, 0, sizeof(vars));
+    for_sp = gosub_sp = 0;
+    awaiting_input = 0;
+    set_pins(default_pins);
+#if HW_PINS > 4
+    for (uint8_t i = 4; i < HW_PINS; i++) {     /* pins 5 and up: unused */
+        hw_pin_mode(i + 1, PM_NONE);
+        pins[i] = PM_NONE;
     }
+#endif
 }
 
-/* ================= COMMAND PROCESSING ================= */
+static void new_program(void) {
+    prog_len = 0;
+    clear();
+}
 
-static void process_command(uint8_t *line) {
-    if (!strncmp((char*)line, "RUN", 3)) {
-        run();
+/* ================= COMMANDS ================= */
+
+static void dir_entry(const char *name, void *ctx) {
+    (void)ctx;
+    out_str(name);
+    out_nl();
+}
+
+static void cmd_dir(void) {
+    err = fs_err(hw_fdir(dir_entry));
+}
+
+/* Open the file named by a command's argument. With mode 0 the file is
+ * deleted instead. Returns 1 on success, 0 with err set. */
+static uint8_t open_arg(char *arg, uint8_t mode) {
+    char name[13];
+    if ((err = arg_name(arg, name))) return 0;
+    err = fs_err(mode ? hw_fopen(name, mode) : hw_fdelete(name));
+    if (mode == FS_READ && !err) {
+        file_mode = FS_READ;
+        file_peek = -1;
+    }
+    return !err;
+}
+
+static void cmd_save(char *arg) {
+    if (!open_arg(arg, FS_WRITE)) return;
+    out_mode = OUT_FILE;
+    out_failed = 0;
+    list_program();
+    out_mode = OUT_CONSOLE;
+    if (out_failed) {
+        hw_fabort();
+        err = E_DISK_FULL;
         return;
     }
-    if (!strncmp((char*)line, "LIST", 4)) {
-        list_program();
-        return;
-    }
-    if (!strncmp((char*)line, "SAVE", 4)) {
-        char *filename = strchr((char*)line, ' ');
-        if (filename) {
-            filename++;
-            // Trim whitespace and newline
-            char *end = filename;
-            while (*end && *end != '\r' && *end != '\n' && *end != ' ') end++;
-            *end = '\0';
-            
-            if (hw_save(filename, program, prog_len) == 0) {
-                printf("Saved %d bytes to %s\r\n", prog_len, filename);
-            } else {
-                printf("Error saving to %s\r\n", filename);
-            }
+    err = fs_err(hw_fclose());
+}
+
+/* LOAD and TYPE: read the open file line by line */
+static void cmd_read(char *arg, uint8_t load) {
+    static char line[MAX_SRC + 2];
+    int16_t c;
+    uint8_t n = 0;
+    if (!open_arg(arg, FS_READ)) return;
+    if (load) new_program();
+    do {
+        c = file_getc();
+        if (!load) {
+            if (c == '\n') out_nl();
+            else if (c >= 0) out_char(c);
+            continue;
+        }
+        if (c == '\r') continue;
+        if (c == '\n' || c < 0) {
+            line[n] = 0;
+            n = 0;
+            char *s = skip_spaces(line);
+            if (*s) enter_line(s);
+        } else if (n < MAX_SRC) {
+            line[n++] = c;
         } else {
-            printf("Usage: SAVE <filename>\r\n");
+            err = E_LINE_TOO_LONG;
         }
-        return;
-    }
-    if (!strncmp((char*)line, "LOAD", 4)) {
-        char *filename = strchr((char*)line, ' ');
-        if (filename) {
-            filename++;
-            // Trim whitespace and newline
-            char *end = filename;
-            while (*end && *end != '\r' && *end != '\n' && *end != ' ') end++;
-            *end = '\0';
-            
-            if (hw_load(filename, program, &prog_len, MAX_PROG) == 0) {
-                printf("Loaded %d bytes from %s\r\n", prog_len, filename);
-            } else {
-                printf("Error loading from %s\r\n", filename);
-            }
-        } else {
-            printf("Usage: LOAD <filename>\r\n");
+    } while (c >= 0 && !err);
+    file_close();
+}
+
+/* FORMAT YES: the YES is required, so that storage is never erased by a
+ * mistyped command */
+static void cmd_format(char *arg) {
+    if (!starts_with(skip_spaces(arg), "YES")) err = E_SYNTAX;
+    else err = fs_err(hw_fformat());
+}
+
+/* print a list of words */
+static void help(const char *k) {
+    out_str(k);
+    out_nl();
+}
+
+static void process_command(char *line) {
+    line = skip_spaces(line);
+    if (at_end(line)) return;
+
+    if (is_digit(*line)) {
+        enter_line(line);
+    } else {
+        /* the command word; arg is what follows it */
+        uint8_t n;
+        int8_t i = find_word(cmd_names, line, &n);
+        if (i < 0 || is_alpha(line[n]) || is_digit(line[n])) err = E_SYNTAX;
+        char *arg = line + n;
+        if (!err) switch (i) {
+            case 0:     /* RUN */
+                clear();
+                jump(program, NULL);
+                run();
+                break;
+            case 1:     /* LIST */
+                list_program();
+                break;
+            case 2:     /* NEW */
+                new_program();
+                break;
+            case 3:     /* SAVE */
+                cmd_save(arg);
+                break;
+            case 4:     /* LOAD */
+                cmd_read(arg, 1);
+                break;
+            case 5:     /* DIR */
+                cmd_dir();
+                break;
+            case 6:     /* DEL */
+                open_arg(arg, 0);
+                break;
+            case 7:     /* TYPE */
+                cmd_read(arg, 0);
+                break;
+            case 8:     /* FORMAT */
+                cmd_format(arg);
+                break;
+            default:    /* HELP */
+                help(cmd_names);
+                help(kw_names);
         }
-        return;
     }
 
-    uint16_t ln = atoi((char*)line);
-    if (find_line(ln) != NULL) delete_line(ln);
-    char *src = strchr((char*)line, ' ');
-    if (!src) return;
-
-    uint8_t buf[64];
-    int len = tokenize(src + 1, buf);
-
-    insert_line(ln, buf, len);
+    basic_cmd_err = err;
+    if (err) report(err);
+    err = E_NONE;
 }
 
 /* ================= INPUT ROUTING ================= */
 
 void basic_yield(uint8_t *line) {
-    // printf(" B %s\r\n", line);
-    if (current_input_mode == INPUT_MODE_AWAITING_INPUT) {
-        // Deliver line to INPUT statement handler directly
-        handle_input_response(line);
-        
-        // Reset to command mode
-        current_input_mode = INPUT_MODE_COMMAND;
+    col[OUT_CONSOLE] = 0;   /* the user's Enter ended the line */
+    if (awaiting_input) {
+        awaiting_input = 0;
+        /* a number, with optional spaces and sign */
+        char *s = skip_spaces((char *)line);
+        int16_t v = 0, neg = *s == '-';
+        if (neg || *s == '+') s++;
+        while (is_digit(*s)) v = v * 10 + (*s++ - '0');
+        vars[input_var] = neg ? -v : v;
+        jump(program + resume_line, program + resume_pos);
+        run();
     } else {
-        // Normal command processing
-        process_command(line);
+        process_command((char *)line);
     }
 }
 
-/* ================= MAIN (Linux only) ================= */
+int basic_boot(void) {
+    if (hw_fopen("BOOT.BAS", FS_READ)) return 0;
+    hw_fclose();
+    process_command("LOAD BOOT.BAS");
+    return !basic_cmd_err;
+}
+
+
+/* ================= LINUX TARGET ================= */
 
 #ifdef TARGET_LINUX
 
-void hw_sleep(uint16_t secs) {
-   sleep(secs);
+#include <stdio.h>
+#include <signal.h>
+#include <unistd.h>
+#include <dirent.h>
+#include <sys/stat.h>
+
+/* Files are ordinary files in the current directory, named in 8.3 form.
+ * Like the files on a module, FS_WRITE replaces a file only when it is
+ * closed. */
+
+static volatile sig_atomic_t got_break;
+static FILE *fp;
+static uint8_t fmode;
+static char fname[13];
+static char tmpname[16];
+
+static void on_sigint(int sig) {
+    (void)sig;
+    got_break = 1;
 }
 
-uint8_t hw_peek(uint8_t addr) {
-	return 0;
+void hw_putc(char c) {
+    putchar(c);
 }
 
-void hw_poke(uint8_t addr, uint8_t val) {
-	printf(" POKE 0x%x <- 0x%x\r\n", addr, val);
-};
+int hw_break(void) {
+    if (!got_break) return 0;
+    got_break = 0;
+    return 1;
+}
 
-int hw_save(const char *filename, uint8_t *data, uint16_t len) {
-    FILE *f = fopen(filename, "wb");
-    if (!f) {
-        return -1;
-    }
-    
-    // Write length first (2 bytes, little-endian)
-    uint8_t len_bytes[2];
-    len_bytes[0] = len & 0xFF;
-    len_bytes[1] = (len >> 8) & 0xFF;
-    
-    if (fwrite(len_bytes, 1, 2, f) != 2) {
-        fclose(f);
-        return -1;
-    }
-    
-    // Write program data
-    if (fwrite(data, 1, len, f) != len) {
-        fclose(f);
-        return -1;
-    }
-    
-    fclose(f);
+void hw_delay_ms(uint16_t ms) {
+    fflush(stdout);
+    usleep((useconds_t)ms * 1000);
+}
+
+/* Simulated hardware, for trying programs and for the tests:
+ *   pins     an output's level reads back on IN(); inputs read 1
+ *   ADC      pin 3 reads 300, pin 4 reads 400
+ *   I2C      a 256-byte memory at address 0x50 (first byte written is
+ *            the register address); no other devices answer */
+
+static uint8_t sim_level[HW_PINS] = { 1, 1, 1, 1 };
+static uint8_t sim_mem[256];
+static uint8_t sim_reg;
+
+int hw_pin_mode(uint8_t pin, uint8_t mode) {
+    if (mode != PM_OD && mode != PM_PP) sim_level[pin - 1] = 1;
     return 0;
 }
 
-int hw_load(const char *filename, uint8_t *data, uint16_t *len, uint16_t max_len) {
-    FILE *f = fopen(filename, "rb");
-    if (!f) {
-        return -1;
-    }
-    
-    // Read length (2 bytes, little-endian)
-    uint8_t len_bytes[2];
-    if (fread(len_bytes, 1, 2, f) != 2) {
-        fclose(f);
-        return -1;
-    }
-    
-    uint16_t file_len = len_bytes[0] | (len_bytes[1] << 8);
-    
-    // Check if program fits
-    if (file_len > max_len) {
-        fclose(f);
-        return -1;
-    }
-    
-    // Read program data
-    if (fread(data, 1, file_len, f) != file_len) {
-        fclose(f);
-        return -1;
-    }
-    
-    *len = file_len;
-    fclose(f);
+void hw_pin_write(uint8_t pin, uint8_t level) {
+    sim_level[pin - 1] = level;
+}
+
+uint8_t hw_pin_read(uint8_t pin) {
+    return sim_level[pin - 1];
+}
+
+int16_t hw_adc(uint8_t pin) {
+    return pin == 3 ? 300 : 400;
+}
+
+void hw_led(uint8_t on) {
+    (void)on;
+}
+
+int hw_i2c(uint8_t addr, const uint8_t *w, uint8_t wn, uint8_t *r,
+           uint8_t rn) {
+    if (addr != 0x50) return -1;
+    if (wn) sim_reg = w[0];
+    for (uint8_t i = 1; i < wn; i++) sim_mem[sim_reg++] = w[i];
+    for (uint8_t i = 0; i < rn; i++) r[i] = sim_mem[sim_reg++];
     return 0;
+}
+
+
+int hw_fopen(const char *name, uint8_t mode) {
+    if (fp) return FS_ERR_BUSY;
+    strcpy(fname, name);
+    if (mode == FS_READ) {
+        fp = fopen(name, "rb");
+        if (!fp) return FS_ERR_NOT_FOUND;
+    } else if (mode == FS_WRITE) {
+        snprintf(tmpname, sizeof(tmpname), "%s~", name);
+        fp = fopen(tmpname, "wb");
+        if (!fp) return FS_ERR_IO;
+    } else if (mode == FS_APPEND) {
+        fp = fopen(name, "ab");
+        if (!fp) return FS_ERR_IO;
+    } else {
+        return FS_ERR_INVALID;
+    }
+    fmode = mode;
+    return FS_OK;
+}
+
+int hw_fread(uint8_t *buf, uint16_t len) {
+    if (!fp || fmode != FS_READ) return FS_ERR_NOT_OPEN;
+    return (int)fread(buf, 1, len, fp);
+}
+
+int hw_fwrite(const uint8_t *buf, uint16_t len) {
+    if (!fp || fmode == FS_READ) return FS_ERR_NOT_OPEN;
+    return fwrite(buf, 1, len, fp) == len ? FS_OK : FS_ERR_IO;
+}
+
+int hw_fclose(void) {
+    if (!fp) return FS_ERR_NOT_OPEN;
+    int r = fclose(fp) ? FS_ERR_IO : FS_OK;
+    fp = NULL;
+    if (fmode == FS_WRITE && r == FS_OK && rename(tmpname, fname))
+        r = FS_ERR_IO;
+    return r;
+}
+
+void hw_fabort(void) {
+    if (!fp) return;
+    fclose(fp);
+    fp = NULL;
+    if (fmode == FS_WRITE) remove(tmpname);
+}
+
+int hw_fdelete(const char *name) {
+    return remove(name) ? FS_ERR_NOT_FOUND : FS_OK;
+}
+
+/* list the files in the current directory whose names are 8.3 */
+int hw_fdir(fs_dir_cb cb) {
+    DIR *d = opendir(".");
+    struct dirent *e;
+    struct stat st;
+    if (!d) return FS_ERR_IO;
+    while ((e = readdir(d))) {
+        char norm[13];
+        if (strlen(e->d_name) > 12 ||
+            file_name(e->d_name, strlen(e->d_name), norm) ||
+            strcmp(norm, e->d_name) || stat(e->d_name, &st) ||
+            !S_ISREG(st.st_mode)) continue;
+        cb(e->d_name, NULL);
+    }
+    closedir(d);
+    return FS_OK;
+}
+
+
+int hw_fformat(void) {
+    return HW_ERR_UNSUPPORTED;
 }
 
 int main(void) {
-    char line[MAX_LINE];
+    char line[256];
 
+    signal(SIGINT, on_sigint);
     puts("///");
 
-    while (1) {
-        if (current_input_mode == INPUT_MODE_COMMAND) {
-            printf("> ");
-        }
+    for (;;) {
+        if (!awaiting_input) printf("> ");
         fflush(stdout);
-        
-        if (!fgets(line, sizeof(line), stdin))
-            break;
-
-        basic_yield((uint8_t*)line);
+        if (!fgets(line, sizeof(line), stdin)) break;
+        basic_yield((uint8_t *)line);
     }
-    
     return 0;
 }
 

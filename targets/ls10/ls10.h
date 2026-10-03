@@ -22,4 +22,6 @@
 #define SPI_SS_PORT     GPIOD
 #define SPI_SS          3
 
+#define FRAM_SIZE       8192    // bytes of F-RAM
+
 #endif

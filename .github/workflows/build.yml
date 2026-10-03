@@ -1,0 +1,127 @@
+# Tests, firmware and printed documents for every push and pull request.
+# A tag starting with "v" (for example v1.0) also makes a release with all
+# of them attached.
+#
+# ch32fun and the Pico SDK are pinned to the versions the firmware was
+# verified with; update them deliberately.
+
+name: build
+
+on:
+  push:
+  pull_request:
+
+env:
+  CH32FUN_COMMIT: 6b247c7c10f1a96c1f0117edc47a695e9b0ab538      # 2026-09-28
+  PICO_SDK_COMMIT: 079c6f39023649b154152db30f1d781e884879bc     # 2.3.1
+
+jobs:
+  test:
+    name: make test, and sechsctl for Linux
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: make test
+        run: make test
+      - name: sechsctl (static, Linux x86-64)
+        run: gcc -std=gnu99 -O2 -static -o sechsctl-linux-x86_64 tools/sechs/sechs.c
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sechsctl
+          path: sechsctl-linux-x86_64
+
+  ls10:
+    name: LS10 firmware (CH32V003)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: RISC-V toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-riscv64-unknown-elf libnewlib-dev picolibc-riscv64-unknown-elf
+      - name: ch32fun (pinned)
+        run: |
+          git init targets/ls10/ch32fun
+          git -C targets/ls10/ch32fun fetch --depth 1 https://github.com/cnlohr/ch32fun "$CH32FUN_COMMIT"
+          git -C targets/ls10/ch32fun checkout FETCH_HEAD
+      - name: build (fails if it does not fit the 16KB flash)
+        run: make -C targets/ls10 ls10.bin
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ls10
+          path: targets/ls10/ls10.bin
+
+  rp2040:
+    name: Werkzeug and Blaustahl firmware (RP2040)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: ARM toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake gcc-arm-none-eabi libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib
+      - name: Pico SDK (pinned) with TinyUSB
+        run: |
+          git init "$RUNNER_TEMP/pico-sdk"
+          git -C "$RUNNER_TEMP/pico-sdk" fetch --depth 1 https://github.com/raspberrypi/pico-sdk "$PICO_SDK_COMMIT"
+          git -C "$RUNNER_TEMP/pico-sdk" checkout FETCH_HEAD
+          git -C "$RUNNER_TEMP/pico-sdk" submodule update --init --depth 1 lib/tinyusb
+          echo "PICO_SDK_PATH=$RUNNER_TEMP/pico-sdk" >> "$GITHUB_ENV"
+      - name: Werkzeug
+        run: |
+          cmake -S targets/werkzeug -B build/werkzeug -DPICO_BOARD=machdyne_werkzeug
+          cmake --build build/werkzeug -j4
+      - name: Blaustahl
+        run: |
+          cmake -S targets/blaustahl -B build/blaustahl
+          cmake --build build/blaustahl -j4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rp2040
+          path: |
+            build/werkzeug/werkzeug.uf2
+            build/blaustahl/blaustahl.uf2
+
+  docs:
+    name: reference sheet and guide (PDF)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: WeasyPrint and fonts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-dejavu-core libpango-1.0-0 libpangoft2-1.0-0
+          pip install weasyprint
+      - name: build
+        run: |
+          make poster guide
+          mv poster.pdf machdyne-basic-sechs-a4.pdf
+          mv guide.pdf getting-started-a4.pdf
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docs
+          path: |
+            machdyne-basic-sechs-a4.pdf
+            getting-started-a4.pdf
+
+  release:
+    name: release (tags starting with v)
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, ls10, rp2040, docs]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          find artifacts -type f -exec mv {} . \;
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --title "Machdyne BASIC $GITHUB_REF_NAME" --generate-notes \
+            ls10.bin werkzeug.uf2 blaustahl.uf2 sechsctl-linux-x86_64 \
+            machdyne-basic-sechs-a4.pdf getting-started-a4.pdf

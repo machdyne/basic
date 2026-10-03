@@ -5,14 +5,10 @@ include(pico_sdk_import.cmake)
 project(blaustahl)
 
 add_executable(blaustahl
-        blaustahl.c
-        fram.c
-        ../../../fs/fs.c
-        ../../../basic.c
-        )
-
-target_sources(blaustahl PUBLIC
         ${CMAKE_CURRENT_LIST_DIR}/blaustahl.c
+        ${CMAKE_CURRENT_LIST_DIR}/fram.c
+        ${CMAKE_CURRENT_LIST_DIR}/../../fs/fs.c
+        ${CMAKE_CURRENT_LIST_DIR}/../../basic.c
         )
 
 

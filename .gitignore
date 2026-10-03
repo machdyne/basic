@@ -1,0 +1,26 @@
+# build outputs
+basic
+basic_fs
+fs_test
+fs_nor_test
+sechs_test
+sechsctl
+sechs_sim
+bridge_host
+*.elf
+*.map
+*.bin
+*.hex
+*.lst
+build/
+
+# test files
+ZZ*
+
+# fetched by the LS10 build instructions
+targets/ls10/ch32fun/
+poster.html
+poster.pdf
+ch32prog_test
+guide.html
+guide.pdf
