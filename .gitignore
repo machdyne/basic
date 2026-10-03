@@ -18,9 +18,11 @@ build/
 ZZ*
 
 # fetched by the LS10 build instructions
-targets/ls10/ch32fun/
+targets/ls10/ch32fun
 poster.html
 poster.pdf
 ch32prog_test
 guide.html
 guide.pdf
+__pycache__/
+*.pyc

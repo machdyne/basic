@@ -41,6 +41,7 @@ jobs:
           sudo apt-get install -y gcc-riscv64-unknown-elf libnewlib-dev picolibc-riscv64-unknown-elf
       - name: ch32fun (pinned)
         run: |
+          rm -rf targets/ls10/ch32fun      # (a local link must not get in the way)
           git init targets/ls10/ch32fun
           git -C targets/ls10/ch32fun fetch --depth 1 https://github.com/cnlohr/ch32fun "$CH32FUN_COMMIT"
           git -C targets/ls10/ch32fun checkout FETCH_HEAD
