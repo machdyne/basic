@@ -46,6 +46,22 @@ extern uint32_t ch32_chip_id, ch32_hartinfo;
 /* accesses refused by the write gate; must stay 0 */
 extern uint32_t ch32_refused;
 
+/* what the last connection attempt read back from the configuration
+ * register (0x5AA5xxxx from a chip), and whether the read completed */
+extern uint32_t ch32_last_read;
+extern int ch32_last_read_ok;
+
+/* Stop the chip, read its identity (ch32_chip_id, ch32_hartinfo) and
+ * restart it; nothing is written. */
+int ch32_identify(void);
+
+/* Write and read back a debug data register n times without stopping the
+ * chip; *errors counts the round trips that failed. */
+int ch32_link_test(uint32_t n, uint32_t *errors);
+
+/* if set, called with a short description of each step */
+extern void (*ch32_status)(const char *msg);
+
 const char *ch32_message(int code);
 
 #endif

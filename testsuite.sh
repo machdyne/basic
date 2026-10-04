@@ -1321,6 +1321,8 @@ mod=SIM
 lang=basic" sh -c "./sechsctl -d $PTY info 12 | tail -3"
 run_tool "bridge: no module" "no Sechs module at 0x30" ./sechsctl -d "$PTY" info 0x30
 head -c 9000 /dev/urandom > ZZFW.BIN; printf 'xx fw=Machdyne BASIC\nmod=LS10A\n' >> ZZFW.BIN
+run_tool "bridge: swio-test (simulated CH32V003)" "ok 300 errors 0" sh -c "./sechsctl -d $PTY swio-test 300 2>/dev/null"
+run_tool "bridge: swio-id (simulated CH32V003)" "ok chip 00300500 hartinfo 002120f4" sh -c "./sechsctl -d $PTY swio-id 2>/dev/null"
 run_tool "bridge: flash a module's firmware (simulated CH32V003)" "ok written and verified" sh -c "./sechsctl -d $PTY flash ZZFW.BIN 2>/dev/null"
 head -c 5000 /dev/urandom > ZZFW.BIN
 run_tool "bridge: an image that is not Machdyne BASIC is refused" "fail not a Machdyne BASIC firmware (or too large)" sh -c "./sechsctl -d $PTY flash ZZFW.BIN 2>/dev/null"

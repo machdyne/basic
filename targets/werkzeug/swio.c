@@ -3,19 +3,17 @@
  * CH32V003 (tools/sechs/ch32prog.c, docs/ch32prog.md).
  *
  * Wiring, on the GPIO header's top row (female jumpers on its pins):
- *   header 1 (GPIO0)  drives SWIO through a 1k resistor
- *   header 2 (GPIO1)  senses SWIO, on the module's side of the resistor
+ *   header 1 (GPIO0)  SWIO, directly: no resistor
  *   header 3 (GPIO2)  RESETN, optional (open drain): for recovery
- *   header 9, 10      GND, 3V3
+ * Ground and power come from the module's own connection (for example
+ * the Wolfszahn on the PMOD), or header 9 (GND) and 10 (3V3).
  *
- * The resistor is also the pull-up: the drive pin stays high between
- * pulses, and the module can still pull the line low to answer a read.
- *
- * Bits are timed in CPU cycles (8 ns at 125 MHz) by code running from RAM
- * with interrupts off for each packet, as in the reference programmer:
- * a 1 is low for about 80 ns, a 0 for about 330 ns, each followed by about
- * 80 ns high; a read pulses low for about 80 ns and samples about 160 ns
- * after release.
+ * One pin, as the reference programmers: the line is driven high between
+ * bits, pulled low for each bit, and released only inside a read bit, so
+ * the chip can answer by holding it low; the RP2040's internal pull-up is
+ * enough. Bits are timed in CPU cycles by code running from RAM with
+ * interrupts off for each packet. The timing (measured, see below) can be
+ * changed at run time: bridge command s, sechsctl swio-timing.
  */
 
 #include "pico/stdlib.h"
@@ -24,63 +22,115 @@
 #include "hardware/structs/sio.h"
 #include "../../tools/sechs/ch32prog.h"
 
-#define SWIO_DRV    0
-#define SWIO_SNS    1
+#define SWIO_PIN    0
 #define SWIO_RST    2
+#define SWIO_MASK   (1u << SWIO_PIN)
 
-static uint32_t c1, c0, ch, cs;     /* cycles: 1 low, 0 low, high, sample */
+// Line mode 0 (default): driven high between bits; the chip only ever
+// drives the line during a read bit, so nothing can fight. Mode 1: released
+// (internal pull-up) except during the pulses, for a line shared with other
+// devices (both measured to work).
 
-void swio_init(void) {
+// Nanoseconds (and microseconds for the pause after a transaction), in the
+// middle of the windows measured on a CH32V003 (LS10, 2026-10-04; the
+// chip's debug clock period T is about 83 ns): a 1 works from 120 to 300 ns
+// (T to 4T), a 0 from 500 ns (6T) to at least 2000 ns, any read sample
+// delay from 50 to 250 ns, a pause from 2 us. Both line modes.
+static uint32_t t_one = 180, t_zero = 900, t_gap = 150, t_sample = 150;
+static uint32_t t_stop_us = 4, line_mode = 0;
+static uint32_t c1, c0, cg, cs, cw;      // the same in CPU cycles
+
+static void timing_cycles(void) {
     uint32_t mhz = clock_get_hz(clk_sys) / 1000000;
-    c1 = 80 * mhz / 1000;
-    c0 = 330 * mhz / 1000;
-    ch = 80 * mhz / 1000;
-    cs = 160 * mhz / 1000;
-    gpio_init(SWIO_DRV);
-    gpio_put(SWIO_DRV, 1);
-    gpio_set_dir(SWIO_DRV, true);
-    gpio_init(SWIO_SNS);
-    gpio_set_dir(SWIO_SNS, false);
-    gpio_init(SWIO_RST);            /* released: input with pull-up */
-    gpio_set_pulls(SWIO_RST, true, false);
-    gpio_set_dir(SWIO_RST, false);
+    c1 = t_one * mhz / 1000;
+    c0 = t_zero * mhz / 1000;
+    cg = t_gap * mhz / 1000;
+    cs = t_sample * mhz / 1000;
+    cw = 20000;                         // reads: give up after this many loops
 }
 
-void swio_release(void) {           /* all three back to plain inputs */
-    gpio_init(SWIO_DRV);
-    gpio_init(SWIO_SNS);
+// set the timing: 1 low, 0 low, gap, sample (ns), pause (us), mode
+void swio_set_timing(const uint32_t *v) {
+    t_one = v[0];
+    t_zero = v[1];
+    t_gap = v[2];
+    t_sample = v[3];
+    t_stop_us = v[4];
+    line_mode = v[5];
+    timing_cycles();
+}
+
+void swio_get_timing(uint32_t *v) {
+    v[0] = t_one;
+    v[1] = t_zero;
+    v[2] = t_gap;
+    v[3] = t_sample;
+    v[4] = t_stop_us;
+    v[5] = line_mode;
+}
+
+void swio_init(void) {
+    timing_cycles();
+    gpio_init(SWIO_PIN);
+    gpio_set_pulls(SWIO_PIN, true, false);
+    gpio_set_drive_strength(SWIO_PIN, GPIO_DRIVE_STRENGTH_12MA);
+    gpio_set_slew_rate(SWIO_PIN, GPIO_SLEW_RATE_FAST);
+    gpio_put(SWIO_PIN, 1);
+    gpio_set_dir(SWIO_PIN, line_mode == 0);  // mode 0: driven high
+    gpio_init(SWIO_RST);                    // (RESETN: optional, released)
+    gpio_set_pulls(SWIO_RST, true, false);
+    gpio_set_dir(SWIO_RST, false);
+    busy_wait_us(100);                      // the line high for a moment
+}
+
+void swio_release(void) {
+    gpio_init(SWIO_PIN);
     gpio_init(SWIO_RST);
 }
 
-static inline void __not_in_flash_func(low)(void) { sio_hw->gpio_clr = 1u << SWIO_DRV; }
-static inline void __not_in_flash_func(high)(void) { sio_hw->gpio_set = 1u << SWIO_DRV; }
+static inline void __not_in_flash_func(drive_low)(void) {
+    sio_hw->gpio_clr = SWIO_MASK;
+    sio_hw->gpio_oe_set = SWIO_MASK;
+}
+
+// end of a pulse: mode 0 drives high; mode 1 pushes high briefly and lets go
+static inline void __not_in_flash_func(end_pulse)(void) {
+    sio_hw->gpio_set = SWIO_MASK;
+    sio_hw->gpio_oe_set = SWIO_MASK;
+    if (line_mode) {
+        busy_wait_at_least_cycles(3);
+        sio_hw->gpio_oe_clr = SWIO_MASK;
+    }
+}
 
 static void __not_in_flash_func(send)(uint64_t bits, int n) {
     while (n--) {
         int b = (bits >> n) & 1;
-        low();
+        drive_low();
         busy_wait_at_least_cycles(b ? c1 : c0);
-        high();
-        busy_wait_at_least_cycles(ch);
+        end_pulse();
+        busy_wait_at_least_cycles(cg);
     }
 }
 
-/* one bit from the target: 0 if it holds the line low; -1 if stuck low */
+// one bit from the chip: 0 if it holds the line low; -1 if it stays low
 static int __not_in_flash_func(get)(void) {
-    low();
+    drive_low();
     busy_wait_at_least_cycles(c1);
-    high();
+    sio_hw->gpio_set = SWIO_MASK;           // high, then let go: the chip
+    sio_hw->gpio_oe_clr = SWIO_MASK;        // may now hold the line low
     busy_wait_at_least_cycles(cs);
-    int b = (sio_hw->gpio_in >> SWIO_SNS) & 1;
-    for (int t = 0; !((sio_hw->gpio_in >> SWIO_SNS) & 1); t++)
-        if (t > 2000) return -1;
-    busy_wait_at_least_cycles(ch);
+    int b = (sio_hw->gpio_in >> SWIO_PIN) & 1;
+    uint32_t t = 0;
+    while (!((sio_hw->gpio_in >> SWIO_PIN) & 1))
+        if (++t > cw) return -1;
+    end_pulse();                            // high again (mode 0: driven)
+    busy_wait_at_least_cycles(cg);
     return b;
 }
 
 static void stop(void) {
-    high();
-    busy_wait_us(2);                /* a stop: the line high for > 18T */
+    busy_wait_us(t_stop_us);        // the line high between transactions
 }
 
 int __not_in_flash_func(ch32_dmi_write)(uint8_t reg, uint32_t val) {

@@ -180,12 +180,76 @@ static void prog_progress(int pct) {
     tud_task();         /* let the progress out */
 }
 
+static void prog_status(const char *msg) {
+    char b[100];
+    snprintf(b, sizeof(b), "status %s\n", msg);
+    bridge_puts(b);
+    tud_task();
+}
+
+void bridge_identify(void) {
+    char b[100];
+    if (!wz_prog_pins_free()) {
+        bridge_puts("busy\n");
+        return;
+    }
+    ch32_status = prog_status;
+    swio_init();
+    int r = ch32_identify();
+    swio_release();
+    if (r == CH32_NO_CHIP)
+        snprintf(b, sizeof(b), "fail %s (read %08lx%s)\n", ch32_message(r),
+                 (unsigned long)ch32_last_read,
+                 ch32_last_read_ok ? "" : ", the line stayed low");
+    else if (r && r != CH32_WRONG_CHIP && r != CH32_LOCKED)
+        snprintf(b, sizeof(b), "fail %s\n", ch32_message(r));
+    else
+        snprintf(b, sizeof(b), "%s chip %08lx hartinfo %08lx%s\n", r ? "fail" : "ok",
+                 (unsigned long)ch32_chip_id, (unsigned long)ch32_hartinfo,
+                 r ? " (not a CH32V003, or read-protected)" : "");
+    bridge_puts(b);
+}
+
+void bridge_link_test(uint32_t n) {
+    char b[100];
+    uint32_t errors;
+    if (!wz_prog_pins_free()) {
+        bridge_puts("busy\n");
+        return;
+    }
+    swio_init();
+    uint64_t t0 = time_us_64();
+    int r = ch32_link_test(n, &errors);
+    uint32_t us = (uint32_t)(time_us_64() - t0);
+    swio_release();
+    if (r == CH32_NO_CHIP)
+        snprintf(b, sizeof(b), "fail %s (read %08lx%s)\n", ch32_message(r),
+                 (unsigned long)ch32_last_read,
+                 ch32_last_read_ok ? "" : ", the line stayed low");
+    else if (r) snprintf(b, sizeof(b), "fail %s\n", ch32_message(r));
+    else snprintf(b, sizeof(b), "ok %lu errors %lu (%lu us per round trip)\n",
+                  (unsigned long)n, (unsigned long)errors, (unsigned long)(us / n));
+    bridge_puts(b);
+}
+
+void bridge_swio_timing(const uint32_t *v, int n) {
+    uint32_t t[6];
+    char b[100];
+    if (n == 6) swio_set_timing(v);
+    swio_get_timing(t);
+    snprintf(b, sizeof(b), "ok %lu %lu %lu %lu %lu %lu\n", (unsigned long)t[0],
+             (unsigned long)t[1], (unsigned long)t[2], (unsigned long)t[3],
+             (unsigned long)t[4], (unsigned long)t[5]);
+    bridge_puts(b);
+}
+
 void bridge_prog(const uint8_t *img, uint32_t len, int force) {
     char b[100];
     if (!wz_prog_pins_free()) {
         bridge_puts("busy\n");
         return;
     }
+    ch32_status = prog_status;
     swio_init();
     int r = ch32_flash(img, len, force, prog_progress);
     swio_release();

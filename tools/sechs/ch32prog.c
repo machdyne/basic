@@ -10,6 +10,7 @@
  * allows only the main flash and the flash controller registers needed.
  */
 
+#include <stdio.h>
 #include <string.h>
 #include "ch32prog.h"
 
@@ -61,6 +62,13 @@
 
 uint32_t ch32_chip_id, ch32_hartinfo;
 uint32_t ch32_refused;
+uint32_t ch32_last_read;        /* what connecting read back, for messages */
+int ch32_last_read_ok;
+void (*ch32_status)(const char *msg);
+
+static void say(const char *msg) {
+    if (ch32_status) ch32_status(msg);
+}
 
 /* ---- debug access ------------------------------------------------------ */
 
@@ -138,7 +146,9 @@ static int connect(void) {
         ch32_dmi_write(SHDWCFGR, 0x5AA50400u);  /* only from a chip */
         ch32_dmi_write(CFGR, 0x5AA50400u);
     }
-    if (ch32_dmi_read(CFGR, &v) || (v & 0xFFFF0000u) != 0x5AA50000u)
+    ch32_last_read_ok = !ch32_dmi_read(CFGR, &v);
+    ch32_last_read = v;
+    if (!ch32_last_read_ok || (v & 0xFFFF0000u) != 0x5AA50000u)
         return CH32_NO_CHIP;
     return CH32_OK;
 }
@@ -226,20 +236,43 @@ static int image_ok(const uint8_t *img, uint32_t len, int force) {
     return 0;
 }
 
+/* lock the flash again and restart the target (with RESETN, if wired) */
+static void release(void) {
+    mem_write(FLASH_CTLR, CTLR_LOCK);
+    ch32_dmi_write(DMCONTROL, 0x00000003u);     /* core reset, no halt */
+    ch32_delay_us(2000);
+    ch32_dmi_write(DMCONTROL, 0x00000001u);
+    ch32_dmi_write(DMCONTROL, 0x10000001u);     /* clear havereset */
+    ch32_dmi_write(DMCONTROL, 0x40000001u);     /* resume */
+    ch32_reset_line(1);
+    ch32_delay_us(1000);
+    ch32_reset_line(0);
+}
+
 /* ---- the whole job ------------------------------------------------------- */
 
 int ch32_flash(const uint8_t *img, uint32_t len, int force,
                void (*progress)(int)) {
+    char msg[64];
     int r;
     ch32_refused = 0;
+    say("checking the image");
     if (!image_ok(img, len, force)) return CH32_BAD_IMAGE;     /* rule 4 */
+    say("connecting");
     if ((r = connect())) return r;
+    say("stopping the chip");
     if ((r = halt())) return r;                                /* rule 5 */
-    if ((r = identify())) return r;                            /* rule 3 */
+    r = identify();                                            /* rule 3 */
+    snprintf(msg, sizeof(msg), "chip id %08lx, hartinfo %08lx",
+             (unsigned long)ch32_chip_id, (unsigned long)ch32_hartinfo);
+    say(msg);
+    if (r) return r;
+    say("unlocking the flash");
     if ((r = unlock())) return r;
 
     /* every page of the main flash: erase, program (the image, then 0xFF),
      * verify; up to three attempts per page (rule 6) */
+    say("erasing and writing");
     uint32_t pages = CH32_FLASH_SIZE / CH32_PAGE;
     for (uint32_t p = 0; p < pages; p++) {
         uint32_t a = CH32_FLASH + p * CH32_PAGE, w[16];
@@ -251,6 +284,11 @@ int ch32_flash(const uint8_t *img, uint32_t len, int force,
         int ok = 0;
         for (int attempt = 0; attempt < 3 && !ok; attempt++) {
             if (ch32_refused) return CH32_FORBIDDEN;
+            if (attempt) {
+                snprintf(msg, sizeof(msg), "page %lu did not verify, again",
+                         (unsigned long)p);
+                say(msg);
+            }
             if (erase_page(a)) continue;
             if (p * CH32_PAGE < len && program_page(a, w)) continue;
             ok = page_matches(a, w);
@@ -260,17 +298,70 @@ int ch32_flash(const uint8_t *img, uint32_t len, int force,
         if (progress) progress((int)((p + 1) * 100 / pages));
     }
 
-    /* lock the flash again and restart the target */
-    mem_write(FLASH_CTLR, CTLR_LOCK);
-    ch32_dmi_write(DMCONTROL, 0x00000003u);     /* core reset, no halt */
-    ch32_delay_us(2000);
-    ch32_dmi_write(DMCONTROL, 0x00000001u);
-    ch32_dmi_write(DMCONTROL, 0x10000001u);     /* clear havereset */
-    ch32_dmi_write(DMCONTROL, 0x40000001u);     /* resume */
-    ch32_reset_line(1);                         /* and a hardware reset, */
-    ch32_delay_us(1000);                        /* if RESETN is wired */
-    ch32_reset_line(0);
+    /* a second, complete read-back before the chip is released */
+    say("verifying everything");
+    for (uint32_t p = 0; p < pages; p++) {
+        uint32_t w[16];
+        memset(w, 0xFF, sizeof(w));
+        if (p * CH32_PAGE < len) {
+            uint32_t n = len - p * CH32_PAGE;
+            memcpy(w, img + p * CH32_PAGE, n < CH32_PAGE ? n : CH32_PAGE);
+        }
+        if (!page_matches(CH32_FLASH + p * CH32_PAGE, w)) {
+            snprintf(msg, sizeof(msg), "page %lu differs on read-back",
+                     (unsigned long)p);
+            say(msg);
+            return CH32_VERIFY;         /* left halted: try again */
+        }
+    }
+    snprintf(msg, sizeof(msg), "verified %lu bytes", (unsigned long)CH32_FLASH_SIZE);
+    say(msg);
+
+    say("restarting the chip");
+    release();
     return ch32_refused ? CH32_FORBIDDEN : CH32_OK;
+}
+
+/* Stop the chip, read what it is, and restart it. Nothing is written. */
+int ch32_identify(void) {
+    char msg[64];
+    int r;
+    ch32_refused = 0;
+    say("connecting");
+    if ((r = connect())) return r;
+    say("stopping the chip");
+    if ((r = halt())) return r;
+    r = identify();
+    snprintf(msg, sizeof(msg), "chip id %08lx, hartinfo %08lx",
+             (unsigned long)ch32_chip_id, (unsigned long)ch32_hartinfo);
+    say(msg);
+    say("restarting the chip");
+    release();
+    return r;
+}
+
+/* The link alone: write and read back a debug data register n times,
+ * without stopping the chip. Counts the round trips that came back wrong
+ * or not at all. */
+int ch32_link_test(uint32_t n, uint32_t *errors) {
+    uint32_t v = 0;
+    *errors = 0;
+    for (int i = 0; i < 2; i++) {
+        ch32_dmi_write(SHDWCFGR, 0x5AA50400u);
+        ch32_dmi_write(CFGR, 0x5AA50400u);
+    }
+    ch32_dmi_write(DMCONTROL, 0x00000001u);     /* debug module on, no halt */
+    ch32_dmi_write(DMCONTROL, 0x00000001u);
+    ch32_last_read_ok = !ch32_dmi_read(CFGR, &v);
+    ch32_last_read = v;
+    if (!ch32_last_read_ok || (v & 0xFFFF0000u) != 0x5AA50000u)
+        return CH32_NO_CHIP;
+    for (uint32_t i = 0; i < n; i++) {
+        uint32_t want = 0xA5A50000u ^ (i * 0x9E3779B9u), got = 0;
+        if (ch32_dmi_write(DATA0, want) || ch32_dmi_read(DATA0, &got) || got != want)
+            (*errors)++;
+    }
+    return CH32_OK;
 }
 
 const char *ch32_message(int code) {

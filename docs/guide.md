@@ -118,4 +118,4 @@ Pin 9 is the header's GPIO0; `ADC` reads 0 to 1023.
 - `docs/` in the source: the language (`basic1.md`), the machines
   (`targets.md`) and Sechs (`sechs.md`).
 - A module's firmware can be restored or upgraded from Werkzeug with
-  `sechsctl flash` and three wires (`docs/ch32prog.md`).
+  `sechsctl flash` and one jumper wire (`docs/ch32prog.md`).

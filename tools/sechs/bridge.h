@@ -19,6 +19,19 @@
  *                    docs/ch32prog.md) -> "progress NN" lines, then
  *                    "ok ..." or "fail ..."; nothing is touched unless the
  *                    image is complete and its CRC matches
+ *   i                identify the module on the programming wires: stop it,
+ *                    read its chip ID, restart it; nothing is written
+ *                    -> "ok chip XXXXXXXX hartinfo XXXXXXXX" or "fail ..."
+ *   t N              test the programming wires: write and read back a debug
+ *                    register N times (1-100000), without stopping the chip
+ *                    -> "ok N errors E" or "fail ..."
+ *   s [A B C D E F]  the SWIO timing (Werkzeug): low for
+ *                    a 1 and a 0, the gap, the read sample delay (ns), the
+ *                    pause after a transaction (us), the line mode (0 driven
+ *                    high between bits, 1 released) -> "ok A B C D E F"
+ *
+ * While p and i run, the bridge sends "status ..." lines describing each
+ * step, before the final answer.
  *
  * "busy": the pins are in use by something else on the bridge (on
  * Werkzeug, a BASIC program that declared them). Anything else -> "error".
@@ -40,6 +53,10 @@ int bridge_uart(uint32_t baud);     /* start transparent UART: 0 or -2 */
 void bridge_puts(const char *s);    /* to the computer */
 /* program img (complete, CRC checked); answers with bridge_puts */
 void bridge_prog(const uint8_t *img, uint32_t len, int force);
+void bridge_identify(void);             /* answers with bridge_puts */
+void bridge_link_test(uint32_t n);      /* answers with bridge_puts */
+/* the SWIO timing: n 0 (report) or 6 values; answers with bridge_puts */
+void bridge_swio_timing(const uint32_t *v, int n);
 
 /* feed one character from the computer */
 void bridge_char(char c);

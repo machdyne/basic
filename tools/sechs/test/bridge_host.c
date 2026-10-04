@@ -49,13 +49,56 @@ static void prog_progress(int pct) {
     bridge_puts(b);
 }
 
-void bridge_prog(const uint8_t *img, uint32_t len, int force) {
+static void prog_status(const char *msg) {
+    char b[100];
+    snprintf(b, sizeof(b), "status %s\n", msg);
+    bridge_puts(b);
+}
+
+static void chip_ready(void) {
     static int made;
-    char b[120];
     if (!made) {
         chip_new(0x5a);
         made = 1;
     }
+    ch32_status = prog_status;
+}
+
+void bridge_identify(void) {
+    char b[100];
+    chip_ready();
+    dmi_n = 0;
+    int r = ch32_identify();
+    if (r) snprintf(b, sizeof(b), "fail %s\n", ch32_message(r));
+    else snprintf(b, sizeof(b), "ok chip %08lx hartinfo %08lx\n",
+                  (unsigned long)ch32_chip_id, (unsigned long)ch32_hartinfo);
+    bridge_puts(b);
+}
+
+void bridge_link_test(uint32_t n) {
+    char b[100];
+    uint32_t errors;
+    chip_ready();
+    int r = ch32_link_test(n, &errors);
+    if (r == CH32_NO_CHIP)
+        snprintf(b, sizeof(b), "fail %s (read %08lx%s)\n", ch32_message(r),
+                 (unsigned long)ch32_last_read,
+                 ch32_last_read_ok ? "" : ", the line stayed low");
+    else if (r) snprintf(b, sizeof(b), "fail %s\n", ch32_message(r));
+    else snprintf(b, sizeof(b), "ok %lu errors %lu\n", (unsigned long)n,
+                  (unsigned long)errors);
+    bridge_puts(b);
+}
+
+void bridge_swio_timing(const uint32_t *v, int n) {
+    (void)v;
+    (void)n;
+    bridge_puts("ok 180 900 150 150 4 0\n");      /* (no timing to set) */
+}
+
+void bridge_prog(const uint8_t *img, uint32_t len, int force) {
+    char b[120];
+    chip_ready();
     dmi_n = 0;
     int r = ch32_flash(img, len, force, prog_progress);
     /* (the simulated chip's own checks: what is in its flash, violations) */

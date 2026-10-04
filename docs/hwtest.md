@@ -88,17 +88,36 @@ Open the BASIC port (`...-if00`) in a terminal.
 
 ## 5a. Programming an LS10 from Werkzeug
 
-Wiring and rules: [ch32prog.md](ch32prog.md). Use a spare module first.
+Wiring and rules: [ch32prog.md](ch32prog.md). The LS10 sits in the
+Wolfszahn on the PMOD as usual; one jumper wire goes from Werkzeug's GPIO
+header **pin 1 (GPIO0)** to the LS10's rear **pin 10 (SWIO)**. No resistor.
+Each step only goes on if the previous one passed.
+
+| # | Do | Expect | Result |
+|---|---|---|---|
+| 5a.1 | `sechsctl -d /dev/ttyACM1 swio-test 10000` | `ok 10000 errors 0` (the wire only; the module keeps running) | passed 2026-10-04 (both line modes) |
+| 5a.2 | `sechsctl -d /dev/ttyACM1 swio-id` | `ok chip 003xxxxx hartinfo ...`; the module restarts, nothing written | passed: `00310510`, `002120f4` |
+| 5a.3 | `sechsctl -d /dev/ttyACM1 flash ls10.bin` | status lines, `verified 16384 bytes`, `ok written and verified`, a time | passed: 13.2 s |
+| 5a.4 | `sechsctl -d /dev/ttyACM1 scan`, then `info` | the module answers, `fw=Machdyne BASIC`, its files still there | passed |
+| 5a.5 | 5a.3 ten times in a row | `ok` every time | |
+| 5a.6 | A file that is not Machdyne BASIC | `fail not a Machdyne BASIC firmware`, the module untouched | |
+| 5a.7 | The jumper removed | `fail no chip answers on SWIO (read ffffffff)`, nothing written | |
+| 5a.8 | Unplug Werkzeug's USB in the middle of writing, plug in, flash again | `ok`: the module programs again | |
+| 5a.9 | RESETN wired (header pin 3 to rear pin 11), a firmware that turns SWIO off | flashing recovers it | |
+
+If 5a.1 shows errors, nothing has been written: `swio-timing` shows the
+timing, and the answer shows what was read back (ch32prog.md, section 5).
+
+## 5b. SWIO sharing pin A (LS11 rehearsal)
+
+For modules with SWIO on pin A. On a breadboard, the LS10's SWIO joins the
+Sechs bus's pin A line, with pull-ups and a second module on the bus.
 
 | # | Do | Expect |
 |---|---|---|
-| 5a.1 | Wire SWIO (both pins, 1k), RESETN, GND, 3V3; `sechsctl -d /dev/ttyACM1 flash ls10.bin` | progress, then `ok written and verified`; the module works, its files are still there |
-| 5a.2 | The same without RESETN | `ok` (Machdyne BASIC keeps SWIO on) |
-| 5a.3 | A file that is not Machdyne BASIC | `fail not a Machdyne BASIC firmware`, the module untouched |
-| 5a.4 | SWIO not connected | `fail no chip answers on SWIO`, nothing written |
-| 5a.5 | Unplug Werkzeug's USB in the middle of writing, plug in, flash again | `ok`: the module programs again |
-| 5a.6 | Ten times in a row | `ok` every time |
-| 5a.7 | If 5a.1 says "not a CH32V003" | note the id it shows (the identification may need adjusting) |
+| 5b.1 | `swio-timing 180 900 150 150 4 1` (line released between bits), then 5a.1-5a.4 | the same results |
+| 5b.2 | `info` on the second module before and after | unchanged: same address, no fault |
+| 5b.3 | Power-cycle the programmed module 50 times while a controller polls the bus | it always starts normally, never halted |
 
 ## 6. Blaustahl
 

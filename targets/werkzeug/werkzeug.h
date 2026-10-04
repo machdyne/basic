@@ -26,5 +26,7 @@ int wz_prog_pins_free(void);        /* header GPIO0-2 (pins 9-11) free */
 /* swio.c: the programming wires */
 void swio_init(void);
 void swio_release(void);
+void swio_set_timing(const uint32_t *v);    /* see swio.c */
+void swio_get_timing(uint32_t *v);
 
 #endif

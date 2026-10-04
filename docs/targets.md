@@ -110,8 +110,8 @@ first time. Firmware updates do not touch the files.
 terminal that connects to the BASIC port gets `///`.
 
 **Programming modules.** Werkzeug writes the firmware of an LS10 through
-the GPIO header (SWIO through a 1k resistor on GPIO0, sensed on GPIO1;
-optional RESETN on GPIO2; GND and 3V3 on header pins 9 and 10):
+one jumper wire from GPIO header pin 1 (GPIO0) straight to the module's
+SWIO, no resistor (optional RESETN on GPIO2):
 `sechsctl -d ... flash ls10.bin`. The module's files and address are kept.
 See [ch32prog.md](ch32prog.md).
 

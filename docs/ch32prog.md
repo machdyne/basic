@@ -1,8 +1,9 @@
 # Programming LS10 modules from Werkzeug
 
-**Status: implemented and tested against a simulated CH32V003; not yet run
-on hardware.** This document fixes what the programmer must and must never
-do, because a mistake here can make a module unusable.
+**Status: tested against a simulated CH32V003 and on hardware (an LS10A,
+2026-10-04: one pin, no resistor, a complete flash with read-back in
+13.2 s).** This document fixes what the programmer must and must never do,
+because a mistake here can make a module unusable.
 
 ## 1. Purpose
 
@@ -13,31 +14,60 @@ module keeps its programs and data.
 
 ## 2. Wiring
 
-Only SWIO, power and ground are required. Everything goes to the top row of
-Werkzeug's GPIO header, so female jumpers can be used:
+One jumper wire: Werkzeug's GPIO header **pin 1 (GPIO0)** to the module's
+**SWIO**, directly, with no resistor. The module gets power and ground as
+usual (in the Wolfszahn on the PMOD, for example), or from header pins 9
+(GND) and 10 (3V3).
 
 | Werkzeug header | Signal | LS10A | Required |
 |---|---|---|---|
-| 1 (GPIO0) | drives SWIO through a 1k resistor | J3 pin 4 (SWDIO) | yes |
-| 2 (GPIO1) | senses SWIO, on the module's side of the resistor | J3 pin 4 (SWDIO) | yes |
-| 3 (GPIO2) | RESETN (open drain) | J3 pin 5 (RESETN) | no: for recovery |
-| 9 | GND | GND (Sechs pin 5) | yes |
-| 10 | 3V3 | 3V3 (Sechs pin 6) | yes |
+| 1 (GPIO0) | SWIO | rear pin 10 (J3 pin 4, SWDIO) | yes |
+| 3 (GPIO2) | RESETN (open drain) | rear pin 11 (J3 pin 5, RESETN) | no: for recovery |
+| 9, 10 | GND, 3V3 | Sechs pins 5, 6 | if not powered otherwise |
 
-The two programmer pins and the resistor make one SWIO signal: the drive pin
-stays high between pulses, so the resistor is also the line's pull-up, and
-the module can still pull the line low to answer a read; the sense pin
-reads the line itself. The resistor also limits the current when both ends
-drive.
+One pin carries SWIO in both directions, as in the reference programmers:
+the line is driven high between bits, pulled low for each bit, and
+released only inside a read bit, so the chip can answer by holding it low.
+The chip only drives the line during a read bit, so nothing can fight; the
+RP2040's internal pull-up keeps the line high while it is released. (A
+second line mode, released between bits, also works: for SWIO on a line
+shared with other devices.)
 
 RESETN is optional. Without it, the programmer reaches any module whose
 firmware leaves SWIO on (Machdyne BASIC always does). With it, the
 programmer restarts the module and stops it before its firmware gets far,
 which recovers even firmware that turns SWIO off (rule 7).
 
-J3 pin 6 (WPN, the F-RAM's write protect) stays unconnected. While it
-programs, Werkzeug uses BASIC pins 9-11 (header GPIO0-2); the bridge
-answers `busy` if a BASIC program has declared them.
+The module's WPN (F-RAM write protect) stays unconnected. While it
+programs, Werkzeug uses BASIC pins 9 and 11 (header GPIO0 and GPIO2); the
+bridge answers `busy` if a BASIC program has declared them.
+
+### Timing, measured on a CH32V003 (LS10A, 2026-10-04)
+
+The chip's debug clock period T is about 83 ns, and every edge of the
+working window falls where WCH's rules put it:
+
+| | Rule | Measured |
+|---|---|---|
+| a 1 | T to 4T (83-333 ns) | works 120-300 ns, fails at 110 and 350 |
+| a 0 | at least 6T (500 ns) | fails at 450, works 500-2000 ns (the longest tried) |
+| read sample delay | | anything from 50 to 250 ns |
+| pause after a transaction | | fails at 1 us, works from 2 us |
+| line mode | | both |
+
+The defaults sit in the middle of each window: a 1 is 180 ns low, a 0
+900 ns, each followed by 150 ns high; reads sample 150 ns after release; a
+transaction is followed by 4 us. With them: 10,000 link round trips without
+an error in either line mode; chip ID 0x00310510, hartinfo 0x002120f4; the
+whole 16 KB erased, written, verified page by page and read back in 13.2 s;
+the module restarted running the new firmware. `sechsctl swio-timing`
+shows or changes the timing until Werkzeug restarts (for other chips, or
+other wiring).
+
+The time is about 50 us per debug transaction, so a 32 KB chip (CH32V005)
+would take about 26 s. Auto-execution, a flash loop in the program buffer
+and a cheaper read-back would bring that down to a few seconds: a later
+optimisation.
 
 ## 3. The protocol
 
@@ -64,10 +94,8 @@ been used to program these chips for years:
 
 The pulses are timed in CPU cycles (8 ns at 125 MHz) by a routine that
 runs from RAM with interrupts off for each packet (`targets/werkzeug/
-swio.c`): a 1 is low for about 80 ns, a 0 for about 330 ns, each followed
-by about 80 ns high, as in the reference. This keeps the structure of the
-reference, which is proven on real chips; the bit routines are small and
-can move to the PIO if hardware tests show a need.
+swio.c`), with the measured timing of section 2. The bit routines are
+small and could move to the PIO if that is ever needed.
 
 ## 4. Failsafe rules
 
@@ -88,10 +116,11 @@ These hold in every version of the programmer, and the tests check them.
    erases nothing.
 5. **Stopped before written.** The core is halted (through RESETN, before
    the old firmware runs, if wired) before any erase.
-6. **Verified before released.** Every byte is read back and compared. The
-   module is reset and released only after the whole image verifies; on a
-   mismatch, the programmer erases and writes again (up to three times),
-   then reports the failure and leaves the module halted.
+6. **Verified before released.** Every page is read back and compared as
+   it is written; on a mismatch, the programmer erases and writes it again
+   (up to three times). Then the whole flash is read back a second time.
+   The module is reset and released only after both pass; otherwise the
+   programmer reports the failure and leaves the module halted.
 7. **Always recoverable.** None of the above can leave the module unable
    to be programmed again: the debug interface does not depend on the
    flash contents, and with RESETN wired the programmer can stop any
@@ -104,17 +133,29 @@ These hold in every version of the programmer, and the tests check them.
 ## 5. Use
 
 ```
-sechsctl -d /dev/ttyACM1 flash ls10.bin
+sechsctl -d /dev/ttyACM1 swio-test 1000     # the wire alone: write and read
+                                            # back a debug register 1000 times;
+                                            # the module keeps running
+sechsctl -d /dev/ttyACM1 swio-id            # stop the module, read its chip
+                                            # ID, restart it; writes nothing
+sechsctl -d /dev/ttyACM1 flash ls10.bin     # program it
+sechsctl -d /dev/ttyACM1 swio-timing        # show (or set) the bit timing
 ```
 
 1. `sechsctl` sends the image with its CRC32 over the bridge port
    (`f`, `d`).
 2. On `p`, Werkzeug checks it (rule 4), connects, stops the module
    (rule 5), identifies it (rule 3), then erases, writes and verifies every
-   page of the main flash (rule 6), reporting progress.
+   page of the main flash, and reads it all back again (rule 6). It reports
+   each step (`status` lines: connecting, the chip ID, unlocking, writing,
+   verifying) and the progress; `sechsctl` shows them and the time taken.
 3. On success the flash is locked again and the module restarts with the
    new firmware, its files and address intact. `force` skips the identity
    check of rule 4 (for other firmware).
+
+If `swio-test` fails, its answer shows what was read back: `ffffffff`
+means the chip does not answer (wiring, or timing for another chip), 0 or
+"the line stayed low" means something holds the line low.
 
 ## 6. Implementation and tests
 
@@ -122,8 +163,8 @@ sechsctl -d /dev/ttyACM1 flash ls10.bin
 |---|---|
 | Programmer (hardware-independent) | `tools/sechs/ch32prog.c` |
 | SWIO on Werkzeug | `targets/werkzeug/swio.c` |
-| Bridge commands `f`, `d`, `p` | `tools/sechs/bridge.c`, `targets/werkzeug/usb.c` |
-| `sechsctl flash` | `tools/sechs/sechs.c` |
+| Bridge commands `f`, `d`, `p`, `i`, `t`, `s` | `tools/sechs/bridge.c`, `targets/werkzeug/usb.c` |
+| `sechsctl flash`, `swio-id`, `swio-test`, `swio-timing` | `tools/sechs/sechs.c` |
 | Simulated CH32V003 | `tools/sechs/test/ch32sim.h` |
 
 Every write to the target passes one gate that allows only the main flash
@@ -146,20 +187,30 @@ option bytes, direct flash writes and any other address. `make test` runs
   page programs in progress), each followed by a successful run;
 - a corrupted bit in a random read, 300 times: never a reported success
   with wrong contents;
-- `sechsctl flash` through the bridge to the simulated chip.
+- `sechsctl flash`, `swio-id` and `swio-test` through the bridge to the
+  simulated chip.
 
 No test has ever seen a violation.
 
-**Not yet verified on hardware:** the SWIO timing, the chip identification
-values (`hartinfo` and the chip ID at 0x1FFFF7C4; a mismatch refuses, and
-the message shows the ID read), and the halt-after-reset race with RESETN.
+**Verified on hardware** (LS10A, 2026-10-04): the SWIO timing on one pin
+without a resistor, the chip identification values, a complete flash with
+read-back, and the module running the new firmware afterwards.
 
-## 7. Bringing it up on hardware
+**Not yet verified on hardware:** the halt-after-reset race with RESETN
+(recovering firmware that turns SWIO off), a cable unplugged in the middle
+of a job, and SWIO on a line shared with the Sechs bus (planned for LS11,
+where SWIO is on pin A).
 
-1. A spare LS10 first, with RESETN wired.
-2. `sechsctl flash` with the current `ls10.bin`: expect `ok written and
-   verified`, and the module working as before (files kept).
-3. If it reports a wrong chip, note the ID it shows; the identification may
-   need adjusting (it refuses rather than guesses).
-4. Then without RESETN, then several times in a row, then unplugging the
-   USB cable in the middle once (the module must still program afterwards).
+## 7. Hardware tests
+
+Done (docs/hwtest.md 5): the wire (`swio-test`, both line modes), the
+identification (`swio-id`) and a complete flash on an LS10A.
+
+Still to do:
+
+1. Several flashes in a row, and unplugging the USB cable in the middle of
+   one: the module must still program afterwards.
+2. With RESETN wired: a module whose firmware turns SWIO off, recovered.
+3. SWIO sharing pin A with the Sechs bus (LS11): programming with the
+   line released between bits (`swio-timing ... 1`), another module on the
+   bus undisturbed.

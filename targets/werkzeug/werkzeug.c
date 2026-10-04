@@ -107,7 +107,7 @@ int wz_pins_free(uint8_t first) {
 
 // The programmer uses header GPIO0-2 (pins 9-11) while it runs.
 int wz_prog_pins_free(void) {
-    return !pin_mode[8] && !pin_mode[9] && !pin_mode[10];
+    return !pin_mode[8] && !pin_mode[10];   // GPIO0 (SWIO), GPIO2 (RESETN)
 }
 
 // the green LED (active low)

@@ -16,6 +16,15 @@
  *   sechsctl -d DEV flash FILE [force]      (bridge only) write the module's
  *                                        firmware through the programming
  *                                        wires (docs/ch32prog.md)
+ *   sechsctl -d DEV swio-id                 (bridge only) identify the module
+ *                                        on the programming wires (stops and
+ *                                        restarts it; writes nothing)
+ *   sechsctl -d DEV swio-test [N]           (bridge only) test the programming
+ *                                        wires: N round trips (default 1000)
+ *   sechsctl -d DEV swio-timing [A B C D E F]  (bridge only) show or set
+ *                                        the SWIO timing:
+ *                                        1, 0, gap, sample (ns), pause (us),
+ *                                        mode (0 driven, 1 released)
  *
  * BUS is the Linux I2C bus number (/dev/i2c-BUS, default 1). With
  * -d DEV the tool uses a USB bridge (Werkzeug's second USB serial port,
@@ -55,6 +64,7 @@ static int fd = -1;
 /* ---- USB bridge (bridge.h): one command line, one answer line ---- */
 
 static int line_timeout = 2;    /* seconds */
+static long now_ms(void);
 
 static int bridge_line(char *ans, int max) {
     int n = 0;
@@ -145,6 +155,34 @@ static uint32_t crc32(const uint8_t *p, uint32_t n) {
     return ~c;
 }
 
+/* Send a command for the programming wires and print what the bridge
+ * reports ("status ..." lines, progress) until its final answer, with the
+ * time it took. 0 if the answer was "ok". */
+static int bridge_job(const char *cmd) {
+    char ans[160];
+    long t0 = now_ms();
+    line_timeout = 60;              /* programming takes some seconds */
+    if (write(fd, cmd, strlen(cmd)) < 0) return 1;
+    for (;;) {
+        if (bridge_line(ans, sizeof(ans)) < 0) {
+            fprintf(stderr, "no answer from the bridge\n");
+            return 1;
+        }
+        if (!strncmp(ans, "progress ", 9)) {
+            fprintf(stderr, "\r  %s%%  ", ans + 9);
+            continue;
+        }
+        if (!strncmp(ans, "status ", 7)) {
+            fprintf(stderr, "\r  %s\n", ans + 7);
+            continue;
+        }
+        busy(ans);
+        printf("%s\n", ans);
+        fprintf(stderr, "  (%.1f s)\n", (now_ms() - t0) / 1000.0);
+        return strncmp(ans, "ok", 2) ? 1 : 0;
+    }
+}
+
 /* send a firmware image, then program it; the bridge checks it before
  * touching the module */
 static int bridge_flash(const char *path, int force) {
@@ -175,22 +213,7 @@ static int bridge_flash(const char *path, int force) {
             return 1;
         }
     }
-    line_timeout = 60;              /* programming takes some seconds */
-    if (write(fd, force ? "p force\n" : "p\n", force ? 8 : 2) < 0) return 1;
-    for (;;) {
-        if (bridge_line(ans, sizeof(ans)) < 0) {
-            fprintf(stderr, "no answer from the bridge\n");
-            return 1;
-        }
-        if (!strncmp(ans, "progress ", 9)) {
-            fprintf(stderr, "\r%s%%", ans + 9);
-            continue;
-        }
-        fprintf(stderr, "\r");
-        busy(ans);
-        printf("%s\n", ans);
-        return strncmp(ans, "ok", 2) ? 1 : 0;
-    }
+    return bridge_job(force ? "p force\n" : "p\n");
 }
 
 static int uart_relay(int tty);
@@ -449,7 +472,7 @@ static int usage(void) {
         "usage: sechsctl [-b BUS | -d DEV] scan | info ADDR | halt|run|reset ADDR |\n"
         "                addr ADDR NEW | reg ADDR N [VALUE] | console ADDR |\n"
         "                send ADDR [FILE] | uart BAUD (with -d) |\n"
-        "                flash FILE [force] (with -d)\n");
+        "                flash FILE [force] | swio-id | swio-test [N] (with -d)\n");
     return 2;
 }
 
@@ -469,6 +492,19 @@ int main(int argc, char **argv) {
     if (!strcmp(cmd, "uart") && device && i < argc) return bridge_uart(num(argv[i]));
     if (!strcmp(cmd, "flash") && device && i < argc)
         return bridge_flash(argv[i], i + 1 < argc && !strcmp(argv[i + 1], "force"));
+    if (!strcmp(cmd, "swio-id") && device) return bridge_job("i\n");
+    if (!strcmp(cmd, "swio-timing") && device) {
+        char c[96] = "s";
+        for (int k = 0; k < 6 && i + k < argc; k++)
+            snprintf(c + strlen(c), sizeof(c) - strlen(c), " %ld", num(argv[i + k]));
+        strcat(c, "\n");
+        return bridge_job(c);
+    }
+    if (!strcmp(cmd, "swio-test") && device) {
+        char c[32];
+        snprintf(c, sizeof(c), "t %ld\n", i < argc ? num(argv[i]) : 1000L);
+        return bridge_job(c);
+    }
 #endif
     if (i >= argc) return usage();
     uint8_t addr = num(argv[i++]);

@@ -120,6 +120,31 @@ static void command(void) {
             if (r < 0 || *p) break;
             answer("ok", 0, 0);
             return;
+        case 'i':       /* identify the module on the programming wires */
+            if (*p) break;
+            bridge_identify();
+            return;
+        case 't': {     /* t N: test the programming wires */
+            uint32_t tn = 0;
+            while (*p >= '0' && *p <= '9' && tn <= 100000) tn = tn * 10 + (*p++ - '0');
+            if (*p || tn < 1 || tn > 100000) break;
+            bridge_link_test(tn);
+            return;
+        }
+        case 's': {     /* s [A B C D E F]: the SWIO timing */
+            uint32_t v[6];
+            int k = 0;
+            while (*p && k < 6) {
+                v[k] = 0;
+                if (*p < '0' || *p > '9') break;
+                while (*p >= '0' && *p <= '9') v[k] = v[k] * 10 + (*p++ - '0');
+                k++;
+                p = skip(p);
+            }
+            if (*p || (k != 0 && k != 6)) break;
+            bridge_swio_timing(v, k);
+            return;
+        }
         case 'p': {     /* p [force]: program the module */
             int force = !strcmp(p, "force");
             if (*p && !force) break;

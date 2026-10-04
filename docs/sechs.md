@@ -131,7 +131,10 @@ Carriers and hosts:
 - SHOULD use pulls of 10 kΩ or stronger on lines they receive from the module.
 - MUST current-limit anything they drive onto C/D (for example with a
   series resistor of about 1 kΩ).
-- Provide the pull-ups for A/B. Modules never do.
+- Provide the pull-ups for A/B. Modules never do. Resistors of 2.2-10 kΩ
+  are recommended; a carrier that has only weak internal pull-ups (tens of
+  kΩ) MUST clock the bus slowly enough for its rising edges (about 10 kHz),
+  and should expect noise from neighbouring lines.
 - MUST NOT drive or pull up signal pins while the module is unpowered, if
   they can switch its supply.
 - SHOULD keep modules away from heat. Every wear-out mechanism is slower at
@@ -222,7 +225,8 @@ Every Sechs module implements this section.
 ### 11.1 Bus
 
 - 7-bit addresses, 0x08-0x77. The firmware has a default address, suggested
-  **0x0C**. The current address is stored persistently.
+  **0x0C**. The current address is stored persistently. A module never uses
+  a stored address outside 0x08-0x77 (a damaged one): it uses its default.
 - 100 kHz MUST be supported. Modules MAY stretch the clock, and controllers
   MUST support clock stretching.
 - Controllers discover modules by probing each address with an address-only
@@ -288,6 +292,8 @@ before the controller has acknowledged the previous one. A read of a port
 register such as CDATA must not lose that byte when the controller ends the
 read: the reference implementation removes bytes from the output buffer
 only when the transfer ends, minus any byte that was loaded but not sent.
+A byte loaded after the buffer ran empty (a filler) was never taken from
+it, and must not be counted back.
 
 ### 11.5 INFO
 
@@ -374,6 +380,15 @@ A console is an interactive session with the firmware.
 | 0x18 | CIN | R | bytes the module can accept |
 | 0x19 | COUT | R | bytes waiting to be read |
 | 0x1A | CDATA | R/W P | write: input, read: output |
+
+- A controller reads at most COUT bytes from CDATA at a time.
+- When its output buffer is full, a module waits for the controller to
+  read. If nothing is read for about half a second, it stops sending
+  output to the I2C console until the controller writes CDATA again, so a
+  controller that goes away never stops a program.
+- A module may take a moment to start answering (a LOAD, a program that
+  waits); a controller treats the console as finished only after it has
+  been quiet for a while (`sechsctl`: 300 ms).
 
 ### 12.3 Writable label (CAPS bit 3)
 
