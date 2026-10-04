@@ -59,7 +59,7 @@ extern char basic_line[BASIC_LINE];
 #define PM_OD    2      /* open-drain output */
 #define PM_PP    3      /* push-pull output */
 #define PM_AIN   4      /* analog input */
-#define PM_I2C   5      /* local I2C controller (C = SCL, D = SDA) */
+#define PM_I2C   5      /* local I2C master (C = SCL, D = SDA) */
 #define PM_UART  6      /* UART to a peripheral (C = RX, D = TX) */
 #define PM_NET   7      /* Sechs I2C target (A and B) */
 

@@ -7,7 +7,7 @@ command codes are provisional until the first compliant firmware is built.**
 Sechs (German for "six") is an interface standard for small, inexpensive,
 long-lived programmable modules with six contacts: a host I2C bus, two local
 I/O pins, ground and 3.3V. A module that follows this spec can be plugged into
-any carrier that follows it, managed by any controller that follows it, and
+any carrier that follows it, managed by any master that follows it, and
 will not damage or disturb either.
 
 The keywords MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are used as described
@@ -20,7 +20,7 @@ Sechs is a small contract between:
 - **modules**, which run programs,
 - **carriers**, which modules plug into and which give the local pins a
   meaning,
-- **controllers**, which talk to modules over I2C.
+- **masters**, which talk to modules over I2C.
 
 It defines the six-pin interface, how a module behaves from power-on until
 its program runs, a minimal I2C protocol every module implements, and a few
@@ -72,8 +72,8 @@ historical purposes.
 | **Program** | What a user loads into the module, in a language the firmware accepts. Stored as a file. |
 | **File** | A named unit of storage on the module: a program or data (for example a log). |
 | **Carrier** | A board with a Sechs socket. Powers the module and gives pins C/D a meaning. |
-| **Controller** | Anything that masters the I2C bus on A/B. |
-| **Programmer** | A controller (often with a terminal) used to load programs into modules. |
+| **Master** | Anything that drives the I2C bus on A/B: it starts every transfer and drives the clock. |
+| **Programmer** | A master (often with a terminal) used to load programs into modules. |
 | **Networked / stand-alone** | Whether A/B are an I2C bus or free for the program (Section 9). |
 | **Boot window** | The time after power-on in which a module can be stopped before its program starts. |
 
@@ -88,7 +88,7 @@ A compliant module MUST keep these rules regardless of its program:
 3. **Nothing drives C/D early.** C and D are not driven until the boot window
    has ended and a program or console has claimed them.
 4. **A/B are a bus.** In networked mode the module drives A/B only as an I2C
-   target, by pulling low.
+   slave, by pulling low.
 5. **No pulls on A/B**, except the brief probe in Section 9.2.
 6. **Contradictions stop the program.** A program whose pin declaration
    contradicts what the module observes does not run; the module reports a
@@ -105,8 +105,8 @@ A compliant module MUST keep these rules regardless of its program:
 
 | Pin | Name | Function |
 |---|---|---|
-| 1 | A | Global I2C SCL (module is target) |
-| 2 | B | Global I2C SDA (module is target) |
+| 1 | A | Global I2C SCL (module is slave) |
+| 2 | B | Global I2C SDA (module is slave) |
 | 3 | C | Local I/O. UART: module receives on C |
 | 4 | D | Local I/O. UART: module transmits on D |
 | 5 | GND | Ground |
@@ -150,24 +150,24 @@ Carriers and hosts:
    restarts the window.
 3. **Then:**
    - console wake received: the console starts,
-   - HALT received: the module waits for a controller,
+   - HALT received: the module waits for a master,
    - program present and its pin declaration consistent: the program runs,
    - program present but inconsistent: fault, the program does not run,
    - no program: the module idles, stays reachable over I2C, and keeps
      listening for a console wake.
 
 On a Pmod port the supply is usually always on, so the window starts when the
-module is inserted. A controller that misses it can still halt a networked
+module is inserted. A master that misses it can still halt a networked
 module afterwards.
 
 ## 9. Networked and stand-alone
 
 ### 9.1 Rules
 
-- The I2C target is active during the boot window in all cases.
-- A controller addressing the module during the boot window makes it
+- The I2C slave is active during the boot window in all cases.
+- A master addressing the module during the boot window makes it
   networked.
-- Programs MAY read A/B as inputs in any mode, and MAY ask for the I2C target
+- Programs MAY read A/B as inputs in any mode, and MAY ask for the I2C slave
   to be switched off after the boot window (for example for buttons with
   pull-ups).
 - A program that **drives** A/B runs only in stand-alone mode. Otherwise it
@@ -176,7 +176,7 @@ module afterwards.
 ### 9.2 Stand-alone probe
 
 Performed only if the program declares that it drives A/B, after the boot
-window, and only if no controller addressed the module:
+window, and only if no master addressed the module:
 
 1. Briefly enable the internal pull-down on A, read A, disable it. Same for B.
 2. If both read low, the module is stand-alone. Otherwise, including any
@@ -186,8 +186,8 @@ The probe is harmless on a real bus. A stand-alone carrier that wants its
 module to drive A/B MUST NOT pull up both A and B.
 
 A module that cannot afford the probe MAY rely on the first condition only
-(no controller has addressed it); it then cannot detect a bus whose
-controller is silent.
+(no master has addressed it); it then cannot detect a bus whose
+master is silent.
 
 ## 10. Pin declaration
 
@@ -205,9 +205,9 @@ pins=NET,NET,OD,AIN
 | `OD` | open-drain output | C, D; A, B only stand-alone |
 | `PP` | push-pull output | C, D; A, B only stand-alone |
 | `AIN` | analog input | C, D, if supported |
-| `I2C` | I2C controller (C=SCL, D=SDA) | C and D together |
+| `I2C` | I2C master (C=SCL, D=SDA) | C and D together |
 | `UART` | UART to a peripheral (C=RX, D=TX) | C and D together |
-| `NET` | Sechs I2C target | A and B together (default) |
+| `NET` | Sechs I2C slave | A and B together (default) |
 
 The declaration SHOULD be readable over I2C without running the program
 (`pins` in INFO, Section 11.5). How a program states it is up to the
@@ -227,9 +227,9 @@ Every Sechs module implements this section.
 - 7-bit addresses, 0x08-0x77. The firmware has a default address, suggested
   **0x0C**. The current address is stored persistently. A module never uses
   a stored address outside 0x08-0x77 (a damaged one): it uses its default.
-- 100 kHz MUST be supported. Modules MAY stretch the clock, and controllers
+- 100 kHz MUST be supported. Modules MAY stretch the clock, and masters
   MUST support clock stretching.
-- Controllers discover modules by probing each address with an address-only
+- Masters discover modules by probing each address with an address-only
   transaction, then reading the signature.
 
 ### 11.2 Register access
@@ -288,8 +288,8 @@ Registers 0x0A-0x17 and 0x1B-0x7F are reserved and read as 0. Registers
 0x80-0xFF belong to the running program (Section 13).
 
 **Note for implementers:** many I2C peripherals load the next byte to send
-before the controller has acknowledged the previous one. A read of a port
-register such as CDATA must not lose that byte when the controller ends the
+before the master has acknowledged the previous one. A read of a port
+register such as CDATA must not lose that byte when the master ends the
 read: the reference implementation removes bytes from the output buffer
 only when the transfer ends, minus any byte that was loaded but not sent.
 A byte loaded after the buffer ran empty (a filler) was never taken from
@@ -317,7 +317,7 @@ a zero byte.
   format for a module that does not.
 - `label` is a name set by a person (Section 12.3).
 - `iface` names the protocol a program offers in the program registers, so
-  that a controller can drive any module offering it without knowing the
+  that a master can drive any module offering it without knowing the
   program.
 
 A fixed-function firmware can return a constant INFO string.
@@ -347,8 +347,8 @@ separate file protocol:
 - Saving replaces a file atomically (invariant 7).
 - OK bit 4 says whether the last command succeeded. After typing the same
   lines into several modules that share one address (for example a batch
-  on a programmer), one read of OK tells the controller whether the command
-  succeeded on every module. A controller writing to modules that share an
+  on a programmer), one read of OK tells the master whether the command
+  succeeded on every module. A master writing to modules that share an
   address cannot read CIN for each of them, so it paces its writes instead.
 
 ### 12.2 Consoles (CAPS bits 1 and 2)
@@ -381,13 +381,13 @@ A console is an interactive session with the firmware.
 | 0x19 | COUT | R | bytes waiting to be read |
 | 0x1A | CDATA | R/W P | write: input, read: output |
 
-- A controller reads at most COUT bytes from CDATA at a time.
-- When its output buffer is full, a module waits for the controller to
+- A master reads at most COUT bytes from CDATA at a time.
+- When its output buffer is full, a module waits for the master to
   read. If nothing is read for about half a second, it stops sending
-  output to the I2C console until the controller writes CDATA again, so a
-  controller that goes away never stops a program.
+  output to the I2C console until the master writes CDATA again, so a
+  master that goes away never stops a program.
 - A module may take a moment to start answering (a LOAD, a program that
-  waits); a controller treats the console as finished only after it has
+  waits); a master treats the console as finished only after it has
   been quiet for a while (`sechsctl`: 300 ms).
 
 ### 12.3 Writable label (CAPS bit 3)
@@ -399,10 +399,10 @@ A console is an interactive session with the firmware.
 ## 13. Program registers
 
 Registers 0x80-0xFF are for the running program to exchange data with
-controllers. Their meaning is defined by the program and named by `iface`.
+masters. Their meaning is defined by the program and named by `iface`.
 Firmware SHOULD give programs access to at least some of them; Machdyne
 BASIC provides 0x80-0x8F as `REG 0` to `REG 15`. They are not cleared when
-a program starts, so a controller can set them before `RUN`.
+a program starts, so a master can set them before `RUN`.
 
 ## 14. Longevity
 
@@ -411,7 +411,7 @@ when the module itself does not last that long.
 
 - **Programs and data outlive modules.** `TYPE` (Section 12.1)
   lets a programmer copy programs and logs off a module before replacing
-  it. Controllers SHOULD keep copies of the programs of the modules they
+  it. Masters SHOULD keep copies of the programs of the modules they
   manage.
 - **Report before failing.** A module that can check its own storage SHOULD
   do so and set the degraded flag when it finds and corrects errors.

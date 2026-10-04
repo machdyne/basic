@@ -69,7 +69,7 @@ static void i2c_target_init(void) {
 }
 
 // One handler for both I2C vectors (events and errors). A read ends with
-// the controller's NACK (AF); the byte loaded after the last one sent was
+// the master's NACK (AF); the byte loaded after the last one sent was
 // never sent.
 void I2C1_EV_IRQHandler(void) __attribute__((interrupt));
 void I2C1_ER_IRQHandler(void) __attribute__((interrupt, alias("I2C1_EV_IRQHandler")));
@@ -232,7 +232,7 @@ int main()
 	DMA1_Channel5->CFGR = DMA_CFGR1_CIRC | DMA_CFGR1_MINC | DMA_CFGR1_EN;
 
 	// BOOT.BAS is loaded now (so that INFO shows its PINS) and run after
-	// the boot window, unless the console is woken or a controller halts
+	// the boot window, unless the console is woken or a master halts
 	// the module.
 	uint8_t loaded = basic_boot();
 	sechs.r[SR_STATUS] = ST_BOOT;
@@ -255,7 +255,7 @@ int main()
 
 // ---- console and time --------------------------------------------------
 
-// the I2C console's output is full: the controller reads meanwhile, in the
+// the I2C console's output is full: the master reads meanwhile, in the
 // I2C interrupt (255 of these, about half a second, before giving up)
 void sechs_wait(void) {
     Delay_Ms(2);
@@ -342,7 +342,7 @@ static void adc_init(void) {
 }
 
 // Sechs: A and B are the I2C target unless a program drives them, which
-// is refused once a controller has addressed the module. (The pull-up
+// is refused once a master has addressed the module. (The pull-up
 // probe of the specification is not implemented, to fit the CH32V003.)
 int hw_pin_mode(uint8_t pin, uint8_t mode) {
     uint8_t i = pin - 1;
@@ -419,14 +419,14 @@ void hw_led(uint8_t on) {
 }
 
 #ifdef DIAG_BREAK
-// (a diagnostic build has no room for the local I2C controller)
+// (a diagnostic build has no room for the local I2C master)
 int hw_i2c(uint8_t addr, const uint8_t *w, uint8_t wn, uint8_t *r,
            uint8_t rn) {
     (void)addr; (void)w; (void)wn; (void)r; (void)rn;
     return -1;
 }
 #else
-// ---- local I2C controller on C (SCL) and D (SDA), bit-banged ----------
+// ---- local I2C master on C (SCL) and D (SDA), bit-banged ----------
 
 #define SCL 2
 #define SDA 3

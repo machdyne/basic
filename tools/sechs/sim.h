@@ -36,12 +36,12 @@ int hw_break(void) {
 void hw_delay_ms(uint16_t ms) { (void)ms; }
 
 /* the console output is full: a host that serves the bus (bridge_host)
- * lets the controller read now, as the I2C interrupt does on a module */
+ * lets the master read now, as the I2C interrupt does on a module */
 void sechs_wait(void) {
     if (sim_poll) sim_poll();
     usleep(2000);       /* as long as on LS10 */
 }
-/* like LS10: pins 1 and 2 cannot be outputs once a controller has
+/* like LS10: pins 1 and 2 cannot be outputs once a master has
  * addressed the module */
 int hw_pin_mode(uint8_t p, uint8_t m) {
     if (p <= 2 && (m == PM_OD || m == PM_PP) && sechs.networked)

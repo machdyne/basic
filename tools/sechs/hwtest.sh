@@ -92,11 +92,11 @@ else
     check "data files (output, append, input)" grep -q "^SUM12$" <<< "$out"
 fi
 
-# ---- a running program and the controller ----
+# ---- a running program and the master ----
 con "NEW" "10 REG 1, REG(0) + 1" "20 GOTO 10" "RUN" > /dev/null
 check "program running (STATUS)" status_has running
 ctl reg "$A" 0 5
-check "registers: controller and program exchange values" reg_is 1 6
+check "registers: master and program exchange values" reg_is 1 6
 ctl reg "$A" 0 41
 check "registers: a second value" reg_is 1 42
 ctl halt "$A"

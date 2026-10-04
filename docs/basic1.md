@@ -219,7 +219,7 @@ replaces the previous declaration.
 | `OD` | open-drain output | any pin |
 | `PP` | push-pull output | any pin |
 | `AIN` | analog input | 3, 4 |
-| `I2C` | I2C controller (3 = SCL, 4 = SDA) | 3 and 4 together |
+| `I2C` | I2C master (3 = SCL, 4 = SDA) | 3 and 4 together |
 | `UART` | reserved for a later version | 3 and 4 together |
 | `NET` | left to the system (for example a bus it is connected by) | 1 and 2 together |
 

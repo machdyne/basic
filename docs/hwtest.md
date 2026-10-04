@@ -62,8 +62,8 @@ Type these on the console (`sechsctl -d /dev/ttyACM1 console 0x0c`).
 | 4.7 | Ctrl-C on the UART console during 4.5 | | `BREAK IN 10` at once |
 | 4.8 | Save a program as `BOOT`, power off and on | | it runs 600 ms after power-on |
 | 4.9 | Power off during a running data logger (`OPEN ... APPEND`, `PRINT #`, in a loop), 10 times | | the file is readable with `TYPE` every time; at most the last line is incomplete |
-| 4.10 | Same as 4.2 with the module on a bus where a controller has addressed it | | `ON A BUS` |
-| 4.11 | Run a data logger, and change the address from the controller while it logs (`sechsctl addr`), several times | | the log stays readable, and the new address survives a power cycle (the address is saved to F-RAM in the main loop, never during a file write) |
+| 4.10 | Same as 4.2 with the module on a bus where a master has addressed it | | `ON A BUS` |
+| 4.11 | Run a data logger, and change the address from the master while it logs (`sechsctl addr`), several times | | the log stays readable, and the new address survives a power cycle (the address is saved to F-RAM in the main loop, never during a file write) |
 
 ## 5. Werkzeug with Machdyne BASIC
 
@@ -117,7 +117,7 @@ Sechs bus's pin A line, with pull-ups and a second module on the bus.
 |---|---|---|
 | 5b.1 | `swio-timing 180 900 150 150 4 1` (line released between bits), then 5a.1-5a.4 | the same results |
 | 5b.2 | `info` on the second module before and after | unchanged: same address, no fault |
-| 5b.3 | Power-cycle the programmed module 50 times while a controller polls the bus | it always starts normally, never halted |
+| 5b.3 | Power-cycle the programmed module 50 times while a master polls the bus | it always starts normally, never halted |
 
 ## 6. Blaustahl
 

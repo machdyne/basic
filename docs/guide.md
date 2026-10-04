@@ -69,7 +69,7 @@ computer.
 ## 5. Talking to a running program
 
 The 16 program registers are shared between a running program and the
-controller. This program counts in register 0:
+master. This program counts in register 0:
 
 ```basic
 NEW
@@ -80,7 +80,7 @@ NEW
 
 `RUN` it, then read the count from the computer while it runs:
 `sechsctl -d /dev/ttyACM1 reg 0x0c 0`. Writing a register
-(`reg 0x0c 1 5`) is how a controller passes a value in.
+(`reg 0x0c 1 5`) is how a master passes a value in.
 
 ## 6. Keeping data
 

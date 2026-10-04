@@ -1,6 +1,6 @@
 # sechsctl
 
-A [Sechs](../../docs/sechs.md) controller for Linux. It
+A [Sechs](../../docs/sechs.md) master for Linux. It
 reaches modules in one of two ways:
 
 - a Linux I2C bus (`/dev/i2c-N`, `-b N`), for example on a Raspberry Pi,

@@ -111,7 +111,7 @@ uint8_t sechs_tx(void) {
 }
 
 void sechs_stop(uint8_t unsent) {
-    /* the bytes the controller took: those handed out, less the one
+    /* the bytes the master took: those handed out, less the one
      * loaded ahead and never sent, unless that one was a filler */
     if (unsent && !filler && out_tx) out_tx--;
     out_r += out_tx;
@@ -128,12 +128,12 @@ int sechs_getc(void) {
     return in_buf[in_r++ & (SECHS_IN_SIZE - 1)];
 }
 
-/* Console output for the controller. (Only the interrupt handler moves
+/* Console output for the master. (Only the interrupt handler moves
  * out_r; this only moves out_w.) */
 void sechs_putc(char c) {
-    /* full: wait for the controller to read (255 sechs_wait calls, about
+    /* full: wait for the master to read (255 sechs_wait calls, about
      * half a second); if nobody reads, the console is left: no more output
-     * for it until the controller types again (con_active) */
+     * for it until the master types again (con_active) */
     for (uint8_t t = 1; OUT_COUNT() >= SECHS_OUT_SIZE; t++) {
         if (!t) {
             sechs.con_active = 0;

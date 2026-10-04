@@ -1,5 +1,5 @@
 /*
- * sechsctl: a Sechs controller for Linux.
+ * sechsctl: a Sechs master for Linux.
  *
  *   sechsctl [-b BUS] scan                  list modules on the bus
  *   sechsctl [-b BUS] info ADDR             identity and status

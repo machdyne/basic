@@ -9,7 +9,7 @@ A lightweight BASIC implementation for embedded systems.
 - **Control flow** - IF/THEN/ELSE, GOTO, GOSUB/RETURN, FOR/NEXT, `:` between statements
 - **I/O** - PRINT, INPUT, data files (OPEN, PRINT #, INPUT #)
 - **Pins** - PINS, OUT, IN, ADC, LED, and I2C devices on the local bus
-- **Sechs** - on modules: an I2C target with a second console, so files and programs can be reached over I2C as well as the UART
+- **Sechs** - on modules: an I2C slave with a second console, so files and programs can be reached over I2C as well as the UART
 - **Time** - SLEEP (seconds), WAIT (milliseconds)
 - **Arithmetic** - Addition, subtraction, multiplication, division
 - **Comparisons** - <, >, <=, >=, <>, ==
@@ -97,9 +97,9 @@ The documents are the source: the script only lays them out, and stops
 with a message if a section it needs is missing. The PDF needs WeasyPrint
 (`pip install weasyprint`).
 
-### Sechs controller tool
+### Sechs master tool
 
-`tools/sechs` is a command-line controller for Sechs modules, on a Linux
+`tools/sechs` is a command-line master for Sechs modules, on a Linux
 I2C bus or through Werkzeug as a USB bridge; see
 [tools/sechs/README.md](tools/sechs/README.md). Hardware testing:
 [docs/hwtest.md](docs/hwtest.md).
@@ -251,9 +251,9 @@ also the module's Sechs pin declaration. Without `PINS`, a program has
 | `OD` | open-drain output | any |
 | `PP` | push-pull output | any |
 | `AIN` | analog input | 3, 4 |
-| `I2C` | I2C controller (3 = SCL, 4 = SDA) | 3 and 4 together |
+| `I2C` | I2C master (3 = SCL, 4 = SDA) | 3 and 4 together |
 | `UART` | reserved | 3 and 4 together |
-| `NET` | Sechs network (I2C target) | 1 and 2 together |
+| `NET` | Sechs network (I2C slave) | 1 and 2 together |
 
 ```basic
 10 PINS NET,NET,OD,AIN
@@ -284,8 +284,8 @@ check for it; `I2C` stops with `I2C ERROR`.
 ### Program registers
 
 `REG n, v` and `REG(n)` (n = 0-15) are program registers that a Sechs
-controller can read and write over I2C (registers 0x80-0x8F). They are not
-cleared by `RUN`, so a controller can set them before a program starts.
+master can read and write over I2C (registers 0x80-0x8F). They are not
+cleared by `RUN`, so a master can set them before a program starts.
 
 ### Data files
 ```basic
@@ -311,12 +311,12 @@ is 300 and `ADC(4)` 400, and a 256-byte I2C memory answers at address 80).
 
 ### Sechs (modules)
 
-On a Sechs module (LS10), pins 1 and 2 are an I2C target that a controller
+On a Sechs module (LS10), pins 1 and 2 are an I2C slave that a master
 uses to identify, control and program the module. See the
 [Sechs specification](docs/sechs.md) and
 [sechs/README.md](sechs/README.md).
 
-- At power-on nothing is driven. For 600 ms a controller can halt the
+- At power-on nothing is driven. For 600 ms a master can halt the
   module, and pressing Enter on the UART wakes the console (115200 baud;
   it answers with `///`). Otherwise `BOOT.BAS` runs. The console stays
   asleep (pin 4 not driven) until it is woken.

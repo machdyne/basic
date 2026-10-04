@@ -154,7 +154,7 @@ static void con_type(const char *s) {
     }
 }
 
-/* Everything the console has printed. A controller that reads while the
+/* Everything the console has printed. A master that reads while the
  * module waits for room (sechs_wait) collects it here too. */
 static char con_out[8192];
 static int con_len, reading = 1;
@@ -227,8 +227,8 @@ int main(void) {
     reg_write(SR_REG + 3, b, 1);
     con_type("RUN\r");
     out = con_read();
-    CHECK(strstr(out, "55\n"), "REG(3) written by the controller: [%s]", out);
-    CHECK(reg1(SR_REG + 2) == 99, "REG 2 read by the controller");
+    CHECK(strstr(out, "55\n"), "REG(3) written by the master: [%s]", out);
+    CHECK(reg1(SR_REG + 2) == 99, "REG 2 read by the master");
 
     /* a program error is a fault */
     con_type("10 PRINT 1 / 0\rRUN\r");
@@ -329,7 +329,7 @@ int main(void) {
     CHECK(!strcmp(h, "10 PRINT \"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijkl\"\n"),
         "a long line listed intact: %s", h);
 
-    /* a controller that stops reading: the module goes on (output is
+    /* a master that stops reading: the module goes on (output is
      * dropped), and output arrives again once it reads */
     reading = 0;
     con_type("HELP\r");

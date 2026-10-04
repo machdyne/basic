@@ -15,17 +15,17 @@ starts, and how it is reached.
 
 A CH32V003 (16KB flash, 2KB RAM) with 8KB of F-RAM, on a
 [Sechs](sechs.md) connector. The firmware is a Sechs
-module: pins 1 and 2 are its I2C target, through which a controller finds,
+module: pins 1 and 2 are its I2C slave, through which a master finds,
 controls and programs it.
 
 **Pins.** 1 (A) and 2 (B) are the Sechs bus; 3 (C) and 4 (D) are local
 I/O: `AIN` on both (ADC channels 6 and 5), `I2C` (3 = SCL, 4 = SDA), and the
 UART console (the module receives on 3 and transmits on 4). The LED is
 `LED`. A program that declares pins 1 and 2 as outputs stops with `ON A
-BUS` once a controller has addressed the module.
+BUS` once a master has addressed the module.
 
 **Start-up.** Nothing is driven at power-on. For 600 ms (the boot window) a
-controller can halt the module, and Enter on the UART wakes the console.
+master can halt the module, and Enter on the UART wakes the console.
 Otherwise `BOOT.BAS` runs.
 
 **Consoles.** The UART console runs at 115200 baud and answers a wake with

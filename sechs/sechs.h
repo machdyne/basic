@@ -63,12 +63,12 @@
 #define SECHS_OUT_SIZE  64  /* console output buffer (power of 2) */
 
 typedef struct {
-    /* registers 0x00-0x06 as read by the controller; the target keeps
+    /* registers 0x00-0x06 as read by the master; the target keeps
      * STATUS, OK and FAULT up to date (sechs_init sets the others) */
     uint8_t r[SR_FAULT + 1];
     uint8_t addr;           /* current address */
     uint8_t new_addr;       /* to apply at STOP, 0 if none */
-    uint8_t networked;      /* a controller has addressed the module */
+    uint8_t networked;      /* a master has addressed the module */
     uint8_t cmd;            /* pending CONTROL command, 0 if none */
     uint8_t con_active;     /* the I2C console has been used */
     uint8_t con_break;      /* Ctrl-C received on the I2C console */
@@ -91,7 +91,7 @@ int sechs_getc(void);                     /* console input, -1 if none */
 void sechs_putc(char c);                  /* console output */
 
 /* ---- implemented by the target ---- */
-/* the console output is full: wait about 2 ms (the controller reads
+/* the console output is full: wait about 2 ms (the master reads
  * meanwhile, in the I2C interrupt); after 255 waits without room, the
  * console counts as left */
 void sechs_wait(void);

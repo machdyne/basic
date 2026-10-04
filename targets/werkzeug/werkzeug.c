@@ -115,9 +115,9 @@ void hw_led(uint8_t on) {
     gpio_put(LED_GREEN, !on);
 }
 
-// ---- I2C controller, bit-banged (BASIC on pins 3/4, the bridge on 1/2) ----
+// ---- I2C master, bit-banged (BASIC on pins 3/4, the bridge on 1/2) ----
 //
-// The controller drives the clock, so timing jitter does no harm; devices
+// The master drives the clock, so timing jitter does no harm; devices
 // may stretch the clock.
 
 // Half a clock period: 5 us for BASIC's I2C (pins 3/4, about 50 kHz with
