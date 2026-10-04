@@ -17,7 +17,7 @@ make sechsctl
 ./sechsctl info 0x0c                  # identity, status, INFO
 ./sechsctl send 0x0c prog.txt         # type a file into the I2C console
 ./sechsctl console 0x0c               # interactive (end with Ctrl-D)
-./sechsctl halt 0x0c                  # also: run, reset
+./sechsctl halt 0x0c                  # also: run, reset, program
 ./sechsctl addr 0x0c 0x21             # give the module a new address
 ./sechsctl reg 0x21 3                 # read program register 3 (REG 3)
 ./sechsctl reg 0x21 3 100             # write it
@@ -51,13 +51,18 @@ on the PMOD socket (top row):
 
 | Module pin | PMOD | Werkzeug | Use |
 |---|---|---|---|
-| 1 (A, SCL) | 1 | GPIO19 | I2C, about 50 kHz |
+| 1 (A, SCL) | 1 | GPIO19 | I2C, about 10 kHz; SWIO with `-s` |
 | 2 (B, SDA) | 2 | GPIO17 | |
 | 3 (C) | 3 | GPIO15 | UART to the module (PIO) |
 | 4 (D) | 4 | GPIO13 | UART from the module (UART0) |
 
-I2C uses the RP2040's internal pull-ups; for long wires add 2.2-4.7k
-pull-ups on pins 1 and 2.
+I2C uses the RP2040's internal pull-ups (hence the slow clock); for long
+wires add 2.2-4.7k pull-ups on pins 1 and 2.
+
+The bridge also programs modules' firmware (`flash`, `swio-id`,
+`swio-test`, `swio-timing`): an LS10 through a jumper from the GPIO header,
+an LS11 through the socket with `-s`. See
+[ch32prog.md](../../docs/ch32prog.md).
 
 ```
 ./sechsctl -d /dev/serial/by-id/usb-Machdyne_Werkzeug_*-if02 scan

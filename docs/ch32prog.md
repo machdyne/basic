@@ -1,16 +1,21 @@
-# Programming LS10 modules from Werkzeug
+# Programming modules from Werkzeug (LS10, LS11)
 
-**Status: tested against a simulated CH32V003 and on hardware (an LS10A,
+**Status: CH32V003 (LS10): tested in simulation and on hardware (an LS10A,
 2026-10-04: one pin, no resistor, a complete flash with read-back in
-13.2 s).** This document fixes what the programmer must and must never do,
+13.2 s). CH32V005 (LS11): tested in simulation only.** This document fixes what the programmer must and must never do,
 because a mistake here can make a module unusable.
 
 ## 1. Purpose
 
-Werkzeug writes the Machdyne BASIC firmware to an LS10 (CH32V003), so that
-users can restore or upgrade their modules without a WCH-LinkE. The
-module's files (F-RAM) and its Sechs address are not touched: an upgraded
+Werkzeug writes the Machdyne BASIC firmware to a module's microcontroller,
+so that users can restore or upgrade their modules without a WCH-LinkE.
+The module's files and its Sechs address are not touched: an upgraded
 module keeps its programs and data.
+
+| Module | Chip | Flash | Pages | SWIO |
+|---|---|---|---|---|
+| LS10 | CH32V003 | 16 KB | 64 bytes | rear pin 10: a jumper from Werkzeug's GPIO header pin 1 |
+| LS11 | CH32V005 | 32 KB | 256 bytes | pin A, in programming mode: through the socket (`-s`) |
 
 ## 2. Wiring
 
@@ -90,7 +95,12 @@ been used to program these chips for years:
   abstract commands, program buffer), and WCH's CPBR/CFGR (0x7C/0x7D) to
   enable the target's output.
 - **Flash:** the flash controller at 0x40022000 (KEYR, MODEKEYR, CTLR,
-  STATR), 64-byte pages, programmed through its page buffer.
+  STATR), programmed a page at a time through its page buffer: 64-byte
+  pages on the CH32V003, 256-byte pages on the CH32V005, with the same
+  sequence (as ch32fun's minichlink).
+- **Identification:** the debug module's chip ID register (0x7F), read
+  without halting, as minichlink does: 0x003..5.. is a CH32V003,
+  0x005..... a CH32V005.
 
 The pulses are timed in CPU cycles (8 ns at 125 MHz) by a routine that
 runs from RAM with interrupts off for each packet (`targets/werkzeug/
@@ -101,19 +111,27 @@ small and could move to the PIO if that is ever needed.
 
 These hold in every version of the programmer, and the tests check them.
 
-1. **Main flash only.** The programmer erases and writes only
-   0x08000000-0x08003FFF (16KB). It never writes the option bytes, the
-   system bootloader area, or any other address.
+1. **Main flash only.** The programmer erases and writes only the
+   identified chip's main flash: 0x08000000-0x08003FFF (16KB) on a
+   CH32V003, 0x08000000-0x08007FFF (32KB) on a CH32V005; before the chip
+   is identified, nothing. It never writes the option bytes, the system
+   bootloader area, or any other address.
 2. **Never the option-byte key.** It never writes OBKEYR, so read and
    write protection cannot be changed, even by mistake. (The reference
    implementation unlocks it; this programmer does not.)
 3. **The right chip.** Before erasing anything, it identifies the target
-   through the debug module and continues only for a CH32V003.
+   through the debug module and continues only for a CH32V003 or a
+   CH32V005. A CH32V003 must also pass the check proven on hardware
+   (hartinfo, and the chip ID word in memory).
 4. **The right image, complete.** The whole image is received into
    Werkzeug's RAM and checked before the module is touched: at most
-   16,384 bytes, its CRC32 as sent by the computer, and the Machdyne BASIC
+   32,768 bytes, its CRC32 as sent by the computer, and the Machdyne BASIC
    identity text inside it (unless forced). A transfer that breaks off
-   erases nothing.
+   erases nothing. Once the chip is identified, and still before anything
+   is written: the image must fit its flash, and the module it was built
+   for (`mod=LS10A` or `mod=LS11A`) must match the chip, since their pins
+   differ (unless forced). A refused image leaves the chip running as
+   before.
 5. **Stopped before written.** The core is halted (through RESETN, before
    the old firmware runs, if wired) before any erase.
 6. **Verified before released.** Every page is read back and compared as
@@ -127,8 +145,8 @@ These hold in every version of the programmer, and the tests check them.
    firmware (even one that turns off the debug pin) before it starts. A
    power cut or an unplugged cable at any point leaves a module that the
    next attempt can program.
-8. **F-RAM untouched.** WPN is not connected, and nothing is sent to the
-   F-RAM.
+8. **Files untouched.** Nothing is sent to the module's F-RAM or
+   EEPROM, whose write-protect pins are not connected to the programmer.
 
 ## 5. Use
 
@@ -141,6 +159,20 @@ sechsctl -d /dev/ttyACM1 swio-id            # stop the module, read its chip
 sechsctl -d /dev/ttyACM1 flash ls10.bin     # program it
 sechsctl -d /dev/ttyACM1 swio-timing        # show (or set) the bit timing
 ```
+
+**LS11, through the socket.** No wires: the module sits in the Wolfszahn
+on the PMOD as usual. Put it in programming mode, then within its 10
+seconds program it with `-s` (SWIO on the socket's pin A):
+
+```
+sechsctl -d /dev/ttyACM1 program 0x0c       # (or BOOT at its console, or
+                                            # a pulse on RESETN)
+sechsctl -d /dev/ttyACM1 -s flash ls11.bin
+```
+
+While the module is in programming mode, pin A is not the Sechs bus: the
+bridge sends nothing on it but SWIO. `-s` also works with `swio-id` and
+`swio-test`.
 
 1. `sechsctl` sends the image with its CRC32 over the bridge port
    (`f`, `d`).
@@ -163,9 +195,9 @@ means the chip does not answer (wiring, or timing for another chip), 0 or
 |---|---|
 | Programmer (hardware-independent) | `tools/sechs/ch32prog.c` |
 | SWIO on Werkzeug | `targets/werkzeug/swio.c` |
-| Bridge commands `f`, `d`, `p`, `i`, `t`, `s` | `tools/sechs/bridge.c`, `targets/werkzeug/usb.c` |
-| `sechsctl flash`, `swio-id`, `swio-test`, `swio-timing` | `tools/sechs/sechs.c` |
-| Simulated CH32V003 | `tools/sechs/test/ch32sim.h` |
+| Bridge commands `f`, `d`, `p`, `i`, `t`, `s`, `c` | `tools/sechs/bridge.c`, `targets/werkzeug/usb.c` |
+| `sechsctl flash`, `swio-id`, `swio-test`, `swio-timing`, `-s` | `tools/sechs/sechs.c` |
+| Simulated CH32V003 and CH32V005 | `tools/sechs/test/ch32sim.h` |
 
 Every write to the target passes one gate that allows only the main flash
 and the five flash controller registers programming needs; anything else
@@ -187,8 +219,11 @@ option bytes, direct flash writes and any other address. `make test` runs
   page programs in progress), each followed by a successful run;
 - a corrupted bit in a random read, 300 times: never a reported success
   with wrong contents;
+- the CH32V005: a 20KB and a full 32KB image, 150 power cuts and 100
+  corrupted reads; firmware for the other module refused both ways
+  (nothing written, the chip runs on); a CH32V004 refused;
 - `sechsctl flash`, `swio-id` and `swio-test` through the bridge to the
-  simulated chip.
+  simulated chips: an LS10 on the header wire, an LS11 in the socket.
 
 No test has ever seen a violation.
 
@@ -196,7 +231,9 @@ No test has ever seen a violation.
 without a resistor, the chip identification values, a complete flash with
 read-back, and the module running the new firmware afterwards.
 
-**Not yet verified on hardware:** the halt-after-reset race with RESETN
+**Not yet verified on hardware:** everything on the CH32V005 (its chip ID
+register, 256-byte page programming, and whether its debug clock gives the
+same timing window: `swio-timing` can adjust it); the halt-after-reset race with RESETN
 (recovering firmware that turns SWIO off), a cable unplugged in the middle
 of a job, and SWIO on a line shared with the Sechs bus (planned for LS11,
 where SWIO is on pin A).

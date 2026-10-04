@@ -119,6 +119,33 @@ Sechs bus's pin A line, with pull-ups and a second module on the bus.
 | 5b.2 | `info` on the second module before and after | unchanged: same address, no fault |
 | 5b.3 | Power-cycle the programmed module 50 times while a master polls the bus | it always starts normally, never halted |
 
+## 5c. LS11 bring-up
+
+The first LS11 boards are programmed with a WCH-LinkE (`make -C
+targets/ls11 flash`); then Werkzeug programs them through the socket
+(5c.8). Then the
+LS10 tests of sections 2-4 apply, with `mod=LS11A`.
+
+| # | Do | Expect |
+|---|---|---|
+| 5c.1 | `sechsctl -d ... info 0x0c` | `mod=LS11A`, `caps 0x87` (bit 7: programming mode) |
+| 5c.2 | UART console, `HELP` | the commands end with `BOOT` |
+| 5c.3 | `LED 1`, `LED 0` | lit, then off (if reversed: `ZW_LED_ACTIVE_LOW` in `board.h`) |
+| 5c.4 | `FORMAT YES`, a program of 3-4 KB, `SAVE`, `NEW`, `LOAD`, `RUN` | it fits (programs of up to 4,096 bytes) and runs the same after `LOAD` |
+| 5c.5 | `PIN 5, AIN` (and 6, 7) with a voltage on each; `PRINT ADC(5)` | 0 at GND, about 1023 at 3.3 V, half way at half |
+| 5c.6 | The I2C console (`sechsctl console`), `HELP` and `LIST` | complete output: pin A is the Sechs bus, so SWIO is off |
+| 5c.7 | Pull RESETN (rear pin 11) low briefly | the LED blinks for 10 s, then the module starts normally |
+| 5c.8 | `sechsctl -d ... -s swio-id` within the 10 s of programming mode (after `sechsctl program 0x0c`) | `ok chip 005...` (first: `-s swio-test 1000`, `ok 1000 errors 0`) |
+| 5c.8b | `sechsctl -d ... program 0x0c`, then `sechsctl -d ... -s flash ls11.bin` | `verified 32768 bytes`, `ok written and verified`; the module restarts with its files |
+| 5c.9 | `BOOT` at the console; `sechsctl program 0x0c` | the module restarts blinking for 10 s, then normally |
+| 5c.10 | Power-cycle 20 times | never in programming mode (only RESETN, `BOOT` or `program` enter it) |
+| 5c.11 | Unplug the module while a program appends to a file, 20 times | `TYPE` and `DIR` still work; the file is complete up to a record |
+
+5c.6 and 5c.10 check that `SWCFG` 0b100 turns SWIO off on the CH32V005 and
+that a power-on never enters programming mode; 5c.7 checks that PD7's
+reset function is enabled. 5c.11 is the filesystem on EEPROM, where a power
+cut can damage the whole page being written.
+
 ## 6. Blaustahl
 
 | # | Do | Expect |

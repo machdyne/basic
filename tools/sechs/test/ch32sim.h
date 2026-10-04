@@ -1,6 +1,6 @@
 /*
- * A simulated CH32V003 for the programmer's tests: a debug module and a
- * flash controller that are stricter than the real chip. Anything the
+ * A simulated CH32V003 or CH32V005 for the programmer's tests: a debug
+ * module and a flash controller that are stricter than the real chip. Anything the
  * failsafe rules forbid (docs/ch32prog.md) is counted in `violations`.
  * Provides ch32_dmi_write/read, ch32_reset_line and ch32_delay_us.
  */
@@ -15,8 +15,11 @@
 
 static struct {
     /* kept across power cuts */
-    uint8_t flash[CH32_FLASH_SIZE];
-    uint32_t chip_id;
+    uint8_t flash[CH32_FLASH_MAX];
+    uint32_t size, page;    /* bytes of flash, bytes per page */
+    uint32_t chip_id;       /* the word at 0x1FFFF7C4 (CH32V003) */
+    uint32_t id7f;          /* debug register 0x7F */
+    uint32_t hartinfo;
     int rdprt;              /* read protection set */
     int absent;             /* nothing on the wire */
     int swio_off_fw;        /* its firmware turns SWIO off once it runs */
@@ -25,7 +28,7 @@ static struct {
     int cfg_ok, halted, haltreq, running, in_reset, boot_left;
     uint32_t data0, progbuf[8], x8, x9, cmderr;
     int locked, flocked, key_n, mkey_n;
-    uint32_t ctlr, addr, statr, latch_a, latch_v, pagebuf[16];
+    uint32_t ctlr, addr, statr, latch_a, latch_v, pagebuf[CH32_PAGE_MAX / 4];
 } chip;
 
 static long violations, key_writes, dmi_n;
@@ -47,14 +50,21 @@ static void chip_power(void) {
     chip.ctlr = chip.statr = chip.addr = 0;
 }
 
-static void chip_new(uint32_t fill) {
+static void chip_new_as(uint32_t fill, int v005) {
     memset(&chip, 0, sizeof(chip));
-    for (uint32_t i = 0; i < CH32_FLASH_SIZE; i++)
+    chip.size = v005 ? 32768 : 16384;
+    chip.page = v005 ? 256 : 64;
+    chip.id7f = v005 ? 0x00500500 : 0x00300500;
+    chip.chip_id = v005 ? 0xFFFFFFFF : 0x00300500;  /* (V005: elsewhere) */
+    chip.hartinfo = v005 ? 0x00212000 : 0x002120f4; /* (V005: not checked) */
+    for (uint32_t i = 0; i < chip.size; i++)
         chip.flash[i] = (uint8_t)(fill + i * 7);
-    chip.chip_id = 0x00300500;
     chip.reset_wired = 1;
     chip_power();
 }
+
+static void chip_new(uint32_t fill) { chip_new_as(fill, 0); }        /* CH32V003 */
+static __attribute__((unused)) void chip_new_v005(uint32_t fill) { chip_new_as(fill, 1); }   /* CH32V005 */
 
 /* SWIO answers unless the chip is absent, or its firmware turned SWIO off
  * (while running, not in reset or halted) */
@@ -67,7 +77,7 @@ static int answers(void) {
 }
 
 static uint32_t mem_rd(uint32_t a) {
-    if (a >= CH32_FLASH && a < CH32_FLASH + CH32_FLASH_SIZE - 3) {
+    if (a >= CH32_FLASH && a < CH32_FLASH + chip.size - 3) {
         uint32_t o = a - CH32_FLASH;
         return chip.flash[o] | chip.flash[o + 1] << 8 |
                chip.flash[o + 2] << 16 | (uint32_t)chip.flash[o + 3] << 24;
@@ -81,7 +91,7 @@ static uint32_t mem_rd(uint32_t a) {
 
 /* a torn erase or program: some bytes changed, some not */
 static void tear_page(uint32_t a, int erase) {
-    for (int i = 0; i < 64; i++) {
+    for (uint32_t i = 0; i < chip.page; i++) {
         if (rand() & 1) continue;
         uint8_t *b = &chip.flash[a - CH32_FLASH + i];
         if (erase) *b = 0xFF;
@@ -90,7 +100,7 @@ static void tear_page(uint32_t a, int erase) {
 }
 
 static void mem_wr(uint32_t a, uint32_t v) {
-    if (a >= CH32_FLASH && a < CH32_FLASH + CH32_FLASH_SIZE) {
+    if (a >= CH32_FLASH && a < CH32_FLASH + chip.size) {
         if (!(chip.ctlr & 0x10000) || chip.locked || chip.flocked)
             violation("write to flash outside page programming", a);
         chip.latch_a = a;
@@ -123,12 +133,12 @@ static void mem_wr(uint32_t a, uint32_t v) {
             return;
         }
         chip.ctlr = v & ~0x40u;
-        if ((v & 0x80000) && (v & 0x10000)) memset(chip.pagebuf, 0xFF, 64);
+        if ((v & 0x80000) && (v & 0x10000)) memset(chip.pagebuf, 0xFF, chip.page);
         if ((v & 0x40000) && (v & 0x10000))
-            chip.pagebuf[(chip.latch_a & 63) / 4] = chip.latch_v;
+            chip.pagebuf[(chip.latch_a & (chip.page - 1)) / 4] = chip.latch_v;
         if (v & 0x40) {         /* STRT */
             uint32_t p = chip.addr;
-            if (p < CH32_FLASH || p >= CH32_FLASH + CH32_FLASH_SIZE || (p & 63)) {
+            if (p < CH32_FLASH || p >= CH32_FLASH + chip.size || (p & (chip.page - 1))) {
                 violation("erase or program outside the main flash", p);
                 chip.statr |= 0x10;
                 return;
@@ -138,16 +148,16 @@ static void mem_wr(uint32_t a, uint32_t v) {
                 tear_page(p, erase);
                 longjmp(cut, 1);
             }
-            if (erase) memset(&chip.flash[p - CH32_FLASH], 0xFF, 64);
+            if (erase) memset(&chip.flash[p - CH32_FLASH], 0xFF, chip.page);
             else if (v & 0x10000)
-                for (int i = 0; i < 64; i++)
+                for (uint32_t i = 0; i < chip.page; i++)
                     chip.flash[p - CH32_FLASH + i] &= ((uint8_t *)chip.pagebuf)[i];
             chip.statr |= 0x20;     /* EOP */
         }
         return;
     }
     if (a == 0x40022008) violation("option byte key (OBKEYR)", a);
-    else if (a >= 0x1FFFF800 && a < 0x1FFFF840) violation("option bytes", a);
+    else if (a >= 0x1FFFF800 && a < 0x1FFFF900) violation("option bytes", a);
     else violation("write to an unexpected address", a);
 }
 
@@ -223,7 +233,8 @@ int ch32_dmi_read(uint8_t reg, uint32_t *v) {
     switch (reg) {
     case 0x7D: *v = 0x5AA50400; break;
     case 0x11: *v = 0x00000002 | (chip.halted ? 0x300 : 0); break;
-    case 0x12: *v = 0x002120f4; break;
+    case 0x12: *v = chip.hartinfo; break;
+    case 0x7F: *v = chip.id7f; break;
     case 0x04: *v = chip.data0; break;
     case 0x16: *v = 0x08000002 | chip.cmderr << 8; break;
     default: *v = 0;

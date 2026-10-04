@@ -10,7 +10,9 @@
 #include <stdlib.h>
 #include "basic.h"
 
-#define MAX_PROG  1024
+#ifndef MAX_PROG
+#define MAX_PROG  1024  /* bytes of program (a target may set more) */
+#endif
 #define MAX_TOK   64    /* tokens per line */
 #define MAX_SRC   (BASIC_LINE - 1)  /* characters per line LOAD reads */
 #define NUM_VARS  26
@@ -79,7 +81,11 @@ static const uint8_t kw_toks[] = {
 };
 
 /* Commands, in the order of the switch in process_command() */
+#ifdef HW_PROG_MODE    /* BOOT: restart in the module's programming mode */
+static const char cmd_names[] = "RUN LIST NEW SAVE LOAD DIR DEL TYPE FORMAT HELP BOOT ";
+#else
 static const char cmd_names[] = "RUN LIST NEW SAVE LOAD DIR DEL TYPE FORMAT HELP ";
+#endif
 
 /* pin mode names for PINS, indexed by PM_* */
 /* PINS mode names in PM_* order, separated by spaces */
@@ -1437,6 +1443,11 @@ static void process_command(char *line) {
             case 8:     /* FORMAT */
                 cmd_format(arg);
                 break;
+#ifdef HW_PROG_MODE
+            case 10:    /* BOOT */
+                hw_prog_mode();
+                break;
+#endif
             default:    /* HELP */
 #ifndef NO_HELP
                 help(cmd_names);

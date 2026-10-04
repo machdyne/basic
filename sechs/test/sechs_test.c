@@ -256,6 +256,14 @@ int main(void) {
     b[0] = CMD_IDENTIFY;
     reg_write(SR_CONTROL, b, 1);
     CHECK(sechs.cmd == 0, "IDENTIFY not implemented");
+    b[0] = CMD_PROGRAM;
+    reg_write(SR_CONTROL, b, 1);
+#ifdef SECHS_PROGRAM
+    CHECK(sechs.cmd == CMD_PROGRAM, "CONTROL PROGRAM (programming mode built in)");
+    sechs.cmd = 0;
+#else
+    CHECK(sechs.cmd == 0, "PROGRAM ignored without programming mode");
+#endif
     uint8_t bc[2] = { SECHS_BROADCAST, CMD_HALT };
     bus_write(0, bc, 2);
     CHECK(sechs.cmd == 0, "broadcasts are not implemented");

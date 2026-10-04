@@ -49,6 +49,9 @@ void sechs_start(uint8_t general_call) {
 
 static void command(uint8_t c) {
     if (c >= CMD_HALT && c <= CMD_RESET) sechs.cmd = c;
+#ifdef SECHS_PROGRAM
+    if (c == CMD_PROGRAM) sechs.cmd = c;
+#endif
 }
 
 void sechs_rx(uint8_t b) {

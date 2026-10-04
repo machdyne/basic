@@ -31,7 +31,7 @@ jobs:
           path: sechsctl-linux-x86_64
 
   ls10:
-    name: LS10 firmware (CH32V003)
+    name: LS10 and LS11 firmware (CH32V003, CH32V005)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -45,12 +45,16 @@ jobs:
           git init targets/ls10/ch32fun
           git -C targets/ls10/ch32fun fetch --depth 1 https://github.com/cnlohr/ch32fun "$CH32FUN_COMMIT"
           git -C targets/ls10/ch32fun checkout FETCH_HEAD
-      - name: build (fails if it does not fit the 16KB flash)
+      - name: LS10 (fails if it does not fit the 16KB flash)
         run: make -C targets/ls10 ls10.bin
+      - name: LS11 (shares LS10's ch32fun)
+        run: make -C targets/ls11 ls11.bin
       - uses: actions/upload-artifact@v4
         with:
           name: ls10
-          path: targets/ls10/ls10.bin
+          path: |
+            targets/ls10/ls10.bin
+            targets/ls11/ls11.bin
 
   rp2040:
     name: Werkzeug and Blaustahl firmware (RP2040)
@@ -124,5 +128,5 @@ jobs:
           find artifacts -type f -exec mv {} . \;
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
             --title "Machdyne BASIC $GITHUB_REF_NAME" --generate-notes \
-            ls10.bin werkzeug.uf2 blaustahl.uf2 sechsctl-linux-x86_64 \
+            ls10.bin ls11.bin werkzeug.uf2 blaustahl.uf2 sechsctl-linux-x86_64 \
             machdyne-basic-sechs-a4.pdf getting-started-a4.pdf

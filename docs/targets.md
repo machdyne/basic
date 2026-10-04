@@ -6,7 +6,7 @@ starts, and how it is reached.
 
 | Target | Pins | Analog inputs | Files | Runs `BOOT.BAS` at start-up |
 |---|---|---|---|---|
-| LS10 (Sechs module) | 1-4 | 3, 4 | 8KB F-RAM | yes |
+| LS10, LS11 (Sechs modules) | 1-4 (LS11 1-7) | 3, 4 (LS11 3-7) | 8KB F-RAM, EEPROM | yes |
 | Werkzeug | 1-24 | 21-24 | flash (2MB on V3C) | yes |
 | Blaustahl | none | none | 8KB F-RAM | yes |
 | Linux | simulated 1-4 | simulated | the current directory | no |
@@ -53,8 +53,69 @@ INFO, the writable label, the stand-alone pull-up probe.
 files. Power-loss safe ([fs.md](fs.md)). Firmware upgrades do not touch
 them.
 
-**Building.** `targets/ls10`, with ch32fun; the firmware fills the 16KB
-flash exactly.
+**Building.** `targets/ls10` (the board's `board.h` and F-RAM driver; the
+module code is shared with LS11 in `targets/ls1x`), with ch32fun; the
+firmware fills the 16KB flash almost exactly.
+
+## LS11 (Sechs module)
+
+A CH32V005 (32KB flash, 6KB RAM) with an 8KB I2C EEPROM, on the Zwölf
+footprint. The same firmware as LS10 (`targets/ls1x`), with more room:
+programs of up to 4,096 bytes, three more pins, and programming through
+pin A. **Not yet tested on hardware.**
+
+**Pins.**
+
+| Pin | Where | Uses |
+|---|---|---|
+| 1 (A) | PD1 | the Sechs bus (SCL); SWIO in programming mode |
+| 2 (B) | PD0 | the Sechs bus (SDA) |
+| 3 (C) | PD6 | `AIN` (ADC 6), `I2C` SCL, the UART console (receives) |
+| 4 (D) | PD5 | `AIN` (ADC 5), `I2C` SDA, the UART console (transmits) |
+| 5 (E) | PD2, rear pin 7 | `IN`, `PP`, `OD`, `AIN` (ADC 3) |
+| 6 (F) | PD3, rear pin 8 | `IN`, `PP`, `OD`, `AIN` (ADC 4) |
+| 7 (G) | PD4, rear pin 9 | `IN`, `PP`, `OD`, `AIN` (ADC 7) |
+
+Pins 5-7 are the `PIN` extension (`PIN 5, AIN`); BASIC 1 programs use 1-4
+as on LS10. E and F are also a second UART (USART2), not used by BASIC
+yet. Rear pin 10 is the same signal as pin 1, rear pin 11 is RESETN and
+rear pin 12 is GND. The ADC has 12 bits; `ADC()` reads 0-1023 as on every
+target. E, F and G go straight to the microcontroller: anything driving
+them must be current-limited (about 1 kΩ). So must anything driving C and
+D: as on LS10, they have no series resistors on the board.
+
+**Programming mode.** Pin A is also SWIO, the CH32V005's programming pin,
+but only in programming mode: otherwise it is the Sechs bus. The module
+enters programming mode for 10 seconds (the LED blinks) when
+
+- it is reset through RESETN (rear pin 11), but not at power-on;
+- `BOOT` is typed at a console (LS11 only: it restarts the module);
+- a master sends the Sechs `PROGRAM` command (CONTROL 0x06, CAPS bit 7).
+
+A programmer connected to pin A then stops it and writes new firmware;
+otherwise it restarts normally after 10 seconds.
+
+**Start-up, consoles, Sechs registers.** As LS10, except: INFO says
+`mod=LS11A`; CAPS also has bit 7 (programming mode); CONTROL also accepts
+0x06 (PROGRAM).
+
+**Files.** 8,176 bytes of the EEPROM (the last 16 hold the address and the
+programming-mode request), 16 files. The EEPROM is bit-banged on its own
+pins (PC4 SDA, PC5 SCL), never on the Sechs bus; its write-protect pin (PC6) is
+held high except while writing. Writes take up to 5 ms per 32-byte page.
+
+**To confirm on hardware:** the LED's polarity (PA1; assumed lit by a low
+pin, as LS10); that `SWCFG` 0b100 turns SWIO off on the CH32V005, as on the
+CH32V003; that PD7's reset function is enabled by default; the EEPROM size
+(`EE_SIZE` in `board.h`: 8192 for an AT24C64, 4096 for an AT24C32); and the
+filesystem on EEPROM under power cuts (a power cut can damage a whole
+page being written, not just one byte).
+
+**Building.** `targets/ls11` (`board.h`, `eeprom.c`), with LS10's
+ch32fun checkout (`targets/ls10/ch32fun`). Flashing: a WCH-LinkE
+(`make flash`), or Werkzeug through the socket with no wires:
+`sechsctl -d ... program 0x0c`, then within 10 seconds
+`sechsctl -d ... -s flash ls11.bin` ([ch32prog.md](ch32prog.md)).
 
 ## Werkzeug
 

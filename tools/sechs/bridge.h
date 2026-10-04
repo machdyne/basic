@@ -25,6 +25,9 @@
  *   t N              test the programming wires: write and read back a debug
  *                    register N times (1-100000), without stopping the chip
  *                    -> "ok N errors E" or "fail ..."
+ *   c 0 | c 1        the programming wire (Werkzeug): 0 the GPIO header's
+ *                    pin 1, 1 the Sechs socket's pin A (modules with SWIO
+ *                    on A, in programming mode) -> "ok 0" or "ok 1"
  *   s [A B C D E F]  the SWIO timing (Werkzeug): low for
  *                    a 1 and a 0, the gap, the read sample delay (ns), the
  *                    pause after a transaction (us), the line mode (0 driven
@@ -43,7 +46,7 @@
 
 #include <stdint.h>
 
-#define BRIDGE_IMAGE_MAX 16384
+#define BRIDGE_IMAGE_MAX 32768   /* the largest supported chip (CH32V005) */
 
 /* implemented by the bridge's hardware */
 /* 0, -1 (not acknowledged) or -2 (busy) */
@@ -57,6 +60,7 @@ void bridge_identify(void);             /* answers with bridge_puts */
 void bridge_link_test(uint32_t n);      /* answers with bridge_puts */
 /* the SWIO timing: n 0 (report) or 6 values; answers with bridge_puts */
 void bridge_swio_timing(const uint32_t *v, int n);
+void bridge_swio_socket(int socket);    /* answers with bridge_puts */
 
 /* feed one character from the computer */
 void bridge_char(char c);

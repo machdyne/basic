@@ -269,11 +269,11 @@ replies. The OK register is designed for this: every bit is 1 for "good", so a
 | 0x00 | SIG0 | R | `S` (0x53) |
 | 0x01 | SIG1 | R | `6` (0x36) |
 | 0x02 | VER | R | spec version: major in bits 7-4, minor in bits 3-0 |
-| 0x03 | CAPS | R | bit 0 file commands on the consoles, 1 UART console, 2 I2C console, 3 writable label, 4 identify, 5 broadcasts, 6 HOLD |
+| 0x03 | CAPS | R | bit 0 file commands on the consoles, 1 UART console, 2 I2C console, 3 writable label, 4 identify, 5 broadcasts, 6 HOLD, 7 programming mode |
 | 0x04 | STATUS | R | bit 0 boot window, 1 halted, 2 running, 3 console active, 4 networked, 5 fault, 6 degraded |
 | 0x05 | OK | R | bit 0 alive, 1 no fault, 2 not degraded, 3 not halted, 4 last console command succeeded |
 | 0x06 | FAULT | R | 0 none, 1 program drives A/B on a bus, 2 C/D contradict declaration, 3 program error, 4 storage check failed |
-| 0x07 | CONTROL | W | 0x01 HALT, 0x02 RUN, 0x03 RESET; optional: 0x04 HOLD (CAPS bit 6), 0x05 IDENTIFY (CAPS bit 4) |
+| 0x07 | CONTROL | W | 0x01 HALT, 0x02 RUN, 0x03 RESET; optional: 0x04 HOLD (CAPS bit 6), 0x05 IDENTIFY (CAPS bit 4), 0x06 PROGRAM (CAPS bit 7) |
 | 0x08 | ADDR | W | two bytes, written to this one register: new address, then its bitwise complement |
 | 0x09 | INFO | R P | identity text (Section 11.5) |
 
@@ -281,6 +281,14 @@ replies. The OK register is designed for this: every bit is 1 for "good", so a
   persistently, only if the complement matches.
 - **IDENTIFY:** if CAPS bit 4 is set, the module makes itself visible for a
   few seconds (for example by blinking an LED), so a person can find it.
+- **PROGRAM:** if CAPS bit 7 is set, the module restarts in its programming
+  mode, in which its firmware can be written (for example through SWIO).
+  What that mode is depends on the module, and its documentation MUST say:
+  which pins it uses, how long it lasts, and how it ends. A module whose
+  programming pin is pin A (shared with the Sechs bus) answers no I2C while
+  in programming mode; a master MUST NOT use the bus during programming.
+  The module MUST return to normal operation by itself if nothing programs
+  it.
 - **Degraded:** the module still works but has detected and corrected a fault
   in its own storage, or otherwise expects to fail. It should be replaced.
 

@@ -24,6 +24,7 @@ Planned work is described in [docs/plan.md](docs/plan.md).
   * [Werkzeug](https://github.com/machdyne/werkzeug)
   * [Blaustahl](https://github.com/machdyne/blaustahl)
   * [Zwölf LS10A](https://machdyne.com/product/zwolf-ls10/)
+  * Zwölf LS11A (in development)
 
 ## Building
 
@@ -45,12 +46,16 @@ $ make test-quick   # the same with fewer random operations
 filesystem on a simulated 8KB F-RAM, so that the file handling used on
 modules is tested on Linux.
 
-### LS10
+### LS10 and LS11
 ```bash
 $ cd targets/ls10
 $ git clone https://github.com/cnlohr/ch32fun
-$ make
+$ make                  # ls10.bin, and flashes it with a WCH-LinkE
+$ make -C ../ls11       # ls11.bin (uses the same ch32fun checkout)
 ```
+
+Both modules share their firmware (`targets/ls1x`); each board's directory
+has a `board.h` with its pins, storage and features.
 
 ### RP2040 (Werkzeug / Blaustahl)
 
@@ -471,7 +476,7 @@ DIV BY 0 IN 10
 ## Technical Details
 
 ### Memory Layout
-- **Program storage**: 1024 bytes (tokenized)
+- **Program storage**: 1024 bytes (tokenized; 4096 on LS11)
 - **Variables**: 26 signed 16-bit integers (A-Z)
 
 ### Token Format
@@ -492,7 +497,7 @@ Each program line:
 
 ## Limitations
 
-- Maximum 1024 bytes total program storage (tokenized)
+- Maximum 1024 bytes total program storage (tokenized; 4096 on LS11)
 - 64 tokens per line
 - 26 variables (A-Z only)
 - 16-bit signed integers only (-32768 to 32767)

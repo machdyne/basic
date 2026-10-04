@@ -58,9 +58,12 @@
 
 /* identification */
 #define CHIPID_ADDR     0x1FFFF7C4u     /* CH32V003: 0x003xxxxx */
+#define DMCHIPID        0x7F            /* the chip ID, in the debug module */
 #define HARTINFO_V003   0x0f4           /* DATA0 at 0xe00000f4 */
 
 uint32_t ch32_chip_id, ch32_hartinfo;
+int ch32_chip;
+uint32_t ch32_flash_size, ch32_page;
 uint32_t ch32_refused;
 uint32_t ch32_last_read;        /* what connecting read back, for messages */
 int ch32_last_read_ok;
@@ -100,7 +103,8 @@ static int mem_read(uint32_t addr, uint32_t *val) {
 /* The write gate: the main flash and the flash controller registers that
  * programming needs. Never OBKEYR, the option bytes or anything else. */
 static int allowed(uint32_t addr) {
-    if (addr >= CH32_FLASH && addr < CH32_FLASH + CH32_FLASH_SIZE) return 1;
+    /* the identified chip's main flash only (none before identification) */
+    if (addr >= CH32_FLASH && addr < CH32_FLASH + ch32_flash_size) return 1;
     return addr == FLASH_KEYR || addr == FLASH_STATR || addr == FLASH_CTLR ||
            addr == FLASH_ADDR || addr == FLASH_MODEKEYR;
 }
@@ -175,15 +179,38 @@ static int halt(void) {
     return CH32_NO_HALT;
 }
 
+/* The chip, from the debug module's chip ID register (0x7F), as minichlink
+ * does: CH32V003 (0x003..5..) or CH32V005 (0x005.....). A CH32V003 must
+ * also pass the check proven on hardware: hartinfo, and the chip ID word
+ * in memory (which is also used if register 0x7F reads 0). */
 static int identify(void) {
-    uint32_t obr = 0;
+    uint32_t obr = 0, id = 0;
+    ch32_chip = 0;
+    ch32_flash_size = ch32_page = 0;
     if (ch32_dmi_read(HARTINFO, &ch32_hartinfo) ||
-        mem_read(CHIPID_ADDR, &ch32_chip_id)) return CH32_NO_CHIP;
-    if ((ch32_hartinfo & 0x7FF) != HARTINFO_V003 || (ch32_chip_id >> 20) != 0x003)
+        ch32_dmi_read(DMCHIPID, &id)) return CH32_NO_CHIP;
+    ch32_chip_id = id;
+    if ((id & 0xFFF00000u) == 0x00500000u) {
+        ch32_chip = 5;
+        ch32_flash_size = 32768;
+        ch32_page = 256;
+    } else if (!id || (id & 0xFFF00F00u) == 0x00300500u) {
+        if (mem_read(CHIPID_ADDR, &ch32_chip_id)) return CH32_NO_CHIP;
+        if ((ch32_hartinfo & 0x7FF) != HARTINFO_V003 || (ch32_chip_id >> 20) != 0x003)
+            return CH32_WRONG_CHIP;
+        ch32_chip = 3;
+        ch32_flash_size = 16384;
+        ch32_page = 64;
+    } else {
         return CH32_WRONG_CHIP;
+    }
     if (mem_read(FLASH_OBR, &obr)) return CH32_NO_CHIP;
     if (obr & OBR_RDPRT) return CH32_LOCKED;
     return CH32_OK;
+}
+
+static const char *chip_name(void) {
+    return ch32_chip == 5 ? "CH32V005" : ch32_chip == 3 ? "CH32V003" : "unknown chip";
 }
 
 static int unlock(void) {
@@ -208,7 +235,7 @@ static int program_page(uint32_t a, const uint32_t *w) {
     if (mem_write(FLASH_CTLR, CTLR_PAGE_PG) ||
         mem_write(FLASH_CTLR, CTLR_PAGE_PG | CTLR_BUF_RST) || flash_wait())
         return -1;
-    for (int i = 0; i < 16; i++) {
+    for (uint32_t i = 0; i < ch32_page / 4; i++) {
         if (mem_write(a + 4 * i, w[i]) ||
             mem_write(FLASH_CTLR, CTLR_PAGE_PG | CTLR_BUF_LOAD) || flash_wait())
             return -1;
@@ -220,20 +247,31 @@ static int program_page(uint32_t a, const uint32_t *w) {
 }
 
 static int page_matches(uint32_t a, const uint32_t *w) {
-    for (int i = 0; i < 16; i++) {
+    for (uint32_t i = 0; i < ch32_page / 4; i++) {
         uint32_t v;
         if (mem_read(a + 4 * i, &v) || v != w[i]) return 0;
     }
     return 1;
 }
 
-static int image_ok(const uint8_t *img, uint32_t len, int force) {
-    static const char id[] = "fw=Machdyne BASIC";
-    if (!len || len > CH32_FLASH_SIZE) return 0;
-    if (force) return 1;
-    for (uint32_t i = 0; i + sizeof(id) - 1 <= len; i++)
-        if (!memcmp(img + i, id, sizeof(id) - 1)) return 1;
+static int contains(const uint8_t *img, uint32_t len, const char *t) {
+    uint32_t n = strlen(t);
+    for (uint32_t i = 0; i + n <= len; i++)
+        if (!memcmp(img + i, t, n)) return 1;
     return 0;
+}
+
+/* the chip a Machdyne BASIC image is for: 3 (LS10A), 5 (LS11A), or 0 */
+static int image_chip(const uint8_t *img, uint32_t len) {
+    if (!contains(img, len, "fw=Machdyne BASIC")) return 0;
+    if (contains(img, len, "mod=LS10A")) return 3;
+    if (contains(img, len, "mod=LS11A")) return 5;
+    return 0;
+}
+
+static int image_ok(const uint8_t *img, uint32_t len, int force) {
+    if (!len || len > CH32_FLASH_MAX) return 0;
+    return force || image_chip(img, len);
 }
 
 /* lock the flash again and restart the target (with RESETN, if wired) */
@@ -256,6 +294,8 @@ int ch32_flash(const uint8_t *img, uint32_t len, int force,
     char msg[64];
     int r;
     ch32_refused = 0;
+    ch32_chip = 0;
+    ch32_flash_size = ch32_page = 0;            /* the gate: closed */
     say("checking the image");
     if (!image_ok(img, len, force)) return CH32_BAD_IMAGE;     /* rule 4 */
     say("connecting");
@@ -263,23 +303,32 @@ int ch32_flash(const uint8_t *img, uint32_t len, int force,
     say("stopping the chip");
     if ((r = halt())) return r;                                /* rule 5 */
     r = identify();                                            /* rule 3 */
-    snprintf(msg, sizeof(msg), "chip id %08lx, hartinfo %08lx",
+    snprintf(msg, sizeof(msg), "%s, chip id %08lx, hartinfo %08lx", chip_name(),
              (unsigned long)ch32_chip_id, (unsigned long)ch32_hartinfo);
     say(msg);
     if (r) return r;
+    /* rule 4, the parts that depend on the chip: nothing written yet, so
+     * the chip simply runs on */
+    r = len > ch32_flash_size ? CH32_BAD_IMAGE :
+        !force && image_chip(img, len) != ch32_chip ? CH32_WRONG_MODULE : 0;
+    if (r) {
+        say("refused: restarting the chip");
+        release();
+        return r;
+    }
     say("unlocking the flash");
     if ((r = unlock())) return r;
 
     /* every page of the main flash: erase, program (the image, then 0xFF),
      * verify; up to three attempts per page (rule 6) */
     say("erasing and writing");
-    uint32_t pages = CH32_FLASH_SIZE / CH32_PAGE;
+    uint32_t pages = ch32_flash_size / ch32_page, pg = ch32_page;
     for (uint32_t p = 0; p < pages; p++) {
-        uint32_t a = CH32_FLASH + p * CH32_PAGE, w[16];
+        uint32_t a = CH32_FLASH + p * pg, w[CH32_PAGE_MAX / 4];
         memset(w, 0xFF, sizeof(w));
-        if (p * CH32_PAGE < len) {
-            uint32_t n = len - p * CH32_PAGE;
-            memcpy(w, img + p * CH32_PAGE, n < CH32_PAGE ? n : CH32_PAGE);
+        if (p * pg < len) {
+            uint32_t n = len - p * pg;
+            memcpy(w, img + p * pg, n < pg ? n : pg);
         }
         int ok = 0;
         for (int attempt = 0; attempt < 3 && !ok; attempt++) {
@@ -290,7 +339,7 @@ int ch32_flash(const uint8_t *img, uint32_t len, int force,
                 say(msg);
             }
             if (erase_page(a)) continue;
-            if (p * CH32_PAGE < len && program_page(a, w)) continue;
+            if (p * pg < len && program_page(a, w)) continue;
             ok = page_matches(a, w);
         }
         if (ch32_refused) return CH32_FORBIDDEN;
@@ -301,20 +350,20 @@ int ch32_flash(const uint8_t *img, uint32_t len, int force,
     /* a second, complete read-back before the chip is released */
     say("verifying everything");
     for (uint32_t p = 0; p < pages; p++) {
-        uint32_t w[16];
+        uint32_t w[CH32_PAGE_MAX / 4];
         memset(w, 0xFF, sizeof(w));
-        if (p * CH32_PAGE < len) {
-            uint32_t n = len - p * CH32_PAGE;
-            memcpy(w, img + p * CH32_PAGE, n < CH32_PAGE ? n : CH32_PAGE);
+        if (p * pg < len) {
+            uint32_t n = len - p * pg;
+            memcpy(w, img + p * pg, n < pg ? n : pg);
         }
-        if (!page_matches(CH32_FLASH + p * CH32_PAGE, w)) {
+        if (!page_matches(CH32_FLASH + p * pg, w)) {
             snprintf(msg, sizeof(msg), "page %lu differs on read-back",
                      (unsigned long)p);
             say(msg);
             return CH32_VERIFY;         /* left halted: try again */
         }
     }
-    snprintf(msg, sizeof(msg), "verified %lu bytes", (unsigned long)CH32_FLASH_SIZE);
+    snprintf(msg, sizeof(msg), "verified %lu bytes", (unsigned long)ch32_flash_size);
     say(msg);
 
     say("restarting the chip");
@@ -332,7 +381,7 @@ int ch32_identify(void) {
     say("stopping the chip");
     if ((r = halt())) return r;
     r = identify();
-    snprintf(msg, sizeof(msg), "chip id %08lx, hartinfo %08lx",
+    snprintf(msg, sizeof(msg), "%s, chip id %08lx, hartinfo %08lx", chip_name(),
              (unsigned long)ch32_chip_id, (unsigned long)ch32_hartinfo);
     say(msg);
     say("restarting the chip");
@@ -368,13 +417,14 @@ const char *ch32_message(int code) {
     switch (code) {
         case CH32_OK: return "written and verified";
         case CH32_NO_CHIP: return "no chip answers on SWIO (check the wiring)";
-        case CH32_WRONG_CHIP: return "not a CH32V003: nothing written";
+        case CH32_WRONG_CHIP: return "not a CH32V003 or CH32V005: nothing written";
         case CH32_LOCKED: return "the chip is read-protected: nothing written";
         case CH32_BAD_IMAGE: return "not a Machdyne BASIC firmware (or too large)";
         case CH32_NO_HALT: return "the chip would not stop (wire RESETN and try again)";
         case CH32_FLASH_ERR: return "the flash could not be unlocked or written";
         case CH32_VERIFY: return "some pages did not verify: try again";
         case CH32_FORBIDDEN: return "refused an access outside the main flash (a bug)";
+        case CH32_WRONG_MODULE: return "the firmware is for another module (LS10A: CH32V003, LS11A: CH32V005): nothing written";
     }
     return "?";
 }

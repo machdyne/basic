@@ -3,7 +3,9 @@
  *
  *   sechsctl [-b BUS] scan                  list modules on the bus
  *   sechsctl [-b BUS] info ADDR             identity and status
- *   sechsctl [-b BUS] halt|run|reset ADDR   CONTROL
+ *   sechsctl [-b BUS] halt|run|reset|program ADDR   CONTROL (program: the
+ *                                        module's programming mode, if CAPS
+ *                                        bit 7 says it has one)
  *   sechsctl [-b BUS] addr ADDR NEW         change a module's address
  *   sechsctl [-b BUS] reg ADDR N [VALUE]    read or write program register N
  *   sechsctl [-b BUS] console ADDR          interactive I2C console
@@ -21,6 +23,11 @@
  *                                        restarts it; writes nothing)
  *   sechsctl -d DEV swio-test [N]           (bridge only) test the programming
  *                                        wires: N round trips (default 1000)
+ *   sechsctl -d DEV -s ...                  (with flash, swio-id, swio-test) SWIO
+ *                                        on the Sechs socket's pin A instead of
+ *                                        the GPIO header's pin 1: for modules
+ *                                        with SWIO on A (LS11), in programming
+ *                                        mode (sechsctl program ADDR first)
  *   sechsctl -d DEV swio-timing [A B C D E F]  (bridge only) show or set
  *                                        the SWIO timing:
  *                                        1, 0, gap, sample (ns), pause (us),
@@ -44,6 +51,7 @@
 /* ---- transport ------------------------------------------------------------ */
 
 static const char *device;      /* -d: a USB bridge */
+static int socket_wire;         /* -s: SWIO on the Sechs socket's pin A */
 
 static int bus_open(int bus);
 static int bus_write(uint8_t addr, const uint8_t *d, int n);
@@ -162,6 +170,15 @@ static int bridge_job(const char *cmd) {
     char ans[160];
     long t0 = now_ms();
     line_timeout = 60;              /* programming takes some seconds */
+    if (strchr("itp", cmd[0])) {    /* jobs on the wire: choose it first */
+        const char *c = socket_wire ? "c 1\n" : "c 0\n";
+        if (write(fd, c, 4) < 0 || bridge_line(ans, sizeof(ans)) < 0) return 1;
+        if (strncmp(ans, "ok", 2) && socket_wire) {
+            fprintf(stderr, "this Werkzeug firmware cannot program through the socket"
+                    " (update it)\n");
+            return 1;
+        }
+    }
     if (write(fd, cmd, strlen(cmd)) < 0) return 1;
     for (;;) {
         if (bridge_line(ans, sizeof(ans)) < 0) {
@@ -186,7 +203,7 @@ static int bridge_job(const char *cmd) {
 /* send a firmware image, then program it; the bridge checks it before
  * touching the module */
 static int bridge_flash(const char *path, int force) {
-    static uint8_t img[16385];
+    static uint8_t img[32769];
     char cmd[160], ans[160];
     FILE *f = fopen(path, "rb");
     if (!f) {
@@ -195,8 +212,8 @@ static int bridge_flash(const char *path, int force) {
     }
     size_t n = fread(img, 1, sizeof(img), f);
     fclose(f);
-    if (n == 0 || n > 16384) {
-        fprintf(stderr, "%s: not a CH32V003 firmware (%zu bytes)\n", path, n);
+    if (n == 0 || n > 32768) {
+        fprintf(stderr, "%s: not a module firmware (%zu bytes; at most 32768)\n", path, n);
         return 2;
     }
     sprintf(cmd, "f %zu %08x\n", n, crc32(img, n));
@@ -469,7 +486,7 @@ static long num(const char *s) {
 static int usage(void) {
     fprintf(stderr,
         "sechsctl " __DATE__ " " __TIME__ "\n"
-        "usage: sechsctl [-b BUS | -d DEV] scan | info ADDR | halt|run|reset ADDR |\n"
+        "usage: sechsctl [-b BUS | -d DEV [-s]] scan | info ADDR | halt|run|reset|program ADDR |\n"
         "                addr ADDR NEW | reg ADDR N [VALUE] | console ADDR |\n"
         "                send ADDR [FILE] | uart BAUD (with -d) |\n"
         "                flash FILE [force] | swio-id | swio-test [N] (with -d)\n");
@@ -478,7 +495,13 @@ static int usage(void) {
 
 int main(int argc, char **argv) {
     int bus = 1, i = 1;
-    while (i + 1 < argc && argv[i][0] == '-') {
+    while (i < argc && argv[i][0] == '-') {
+        if (!strcmp(argv[i], "-s")) {   /* SWIO on the socket's pin A */
+            socket_wire = 1;
+            i++;
+            continue;
+        }
+        if (i + 1 >= argc) return usage();
         if (!strcmp(argv[i], "-b")) bus = num(argv[i + 1]);
         else if (!strcmp(argv[i], "-d")) device = argv[i + 1];
         else return usage();
@@ -512,6 +535,14 @@ int main(int argc, char **argv) {
     if (!strcmp(cmd, "info")) return info(addr);
     if (!strcmp(cmd, "halt") || !strcmp(cmd, "run") || !strcmp(cmd, "reset")) {
         uint8_t c = cmd[0] == 'h' ? CMD_HALT : cmd[1] == 'u' ? CMD_RUN : CMD_RESET;
+        return reg_write(addr, SR_CONTROL, &c, 1) ? 1 : 0;
+    }
+    if (!strcmp(cmd, "program")) {
+        uint8_t caps = 0, c = CMD_PROGRAM;
+        if (bus_read(addr, SR_CAPS, &caps, 1) || !(caps & CAP_PROGRAM)) {
+            fprintf(stderr, "the module at 0x%02x has no programming mode\n", addr);
+            return 1;
+        }
         return reg_write(addr, SR_CONTROL, &c, 1) ? 1 : 0;
     }
     if (!strcmp(cmd, "addr") && i < argc) {

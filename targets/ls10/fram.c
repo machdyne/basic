@@ -21,14 +21,14 @@
 #define CH32V003_SPI_CLK_MODE_POL0_PHA0
 
 #include "ch32fun/extralibs/ch32v003_SPI.h"
-#include "ls10.h"
+#include "board.h"
 #include "../../fs/fs.h"
 
 #define FRAM_READ   0x03
 #define FRAM_WRITE  0x02
 #define FRAM_WREN   0x06
 
-void fram_init(void);
+void storage_init(void);
 
 static void cs_low(void) {
     (SPI_SS_PORT)->BSHR = (1 << (16 + SPI_SS));
@@ -44,7 +44,7 @@ static void command(uint8_t cmd, uint32_t addr) {
     SPI_transfer_8(addr & 0xff);
 }
 
-void fram_init(void) {
+void storage_init(void) {
 
     // set up SPI master interface for FRAM
     SPI_init();

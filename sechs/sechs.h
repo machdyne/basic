@@ -38,6 +38,7 @@
 #define CAP_UART_CON    0x02
 #define CAP_I2C_CON     0x04
 #define CAP_IDENTIFY    0x10
+#define CAP_PROGRAM     0x80    /* programming mode on request (CONTROL 6) */
 
 /* STATUS */
 #define ST_BOOT         0x01
@@ -54,6 +55,7 @@
 #define CMD_RESET       3
 #define CMD_HOLD        4   /* optional: not implemented */
 #define CMD_IDENTIFY    5   /* optional: not implemented */
+#define CMD_PROGRAM     6   /* optional (SECHS_PROGRAM): programming mode */
 
 /* FAULT */
 #define FAULT_BUS       1   /* program drives A/B on a bus */

@@ -55,15 +55,21 @@ static void prog_status(const char *msg) {
     bridge_puts(b);
 }
 
+/* Two simulated modules, as on a bench: a CH32V003 (an LS10) on the
+ * header wire, and a CH32V005 (an LS11) in the socket, reached through
+ * pin A. The bridge's c command switches between them. */
+static int made, on_socket;
+static __typeof__(chip) header_chip, socket_chip;
+
 static void chip_ready(void) {
-    static int made;
     if (!made) {
+        chip_new_v005(0x6b);
+        socket_chip = chip;
         chip_new(0x5a);
         made = 1;
     }
     ch32_status = prog_status;
 }
-
 void bridge_identify(void) {
     char b[100];
     chip_ready();
@@ -88,6 +94,16 @@ void bridge_link_test(uint32_t n) {
     else snprintf(b, sizeof(b), "ok %lu errors %lu\n", (unsigned long)n,
                   (unsigned long)errors);
     bridge_puts(b);
+}
+
+void bridge_swio_socket(int socket) {
+    chip_ready();
+    if (socket != on_socket) {      /* put the current chip aside */
+        if (on_socket) socket_chip = chip, chip = header_chip;
+        else header_chip = chip, chip = socket_chip;
+        on_socket = socket;
+    }
+    bridge_puts(socket ? "ok 1\n" : "ok 0\n");
 }
 
 void bridge_swio_timing(const uint32_t *v, int n) {

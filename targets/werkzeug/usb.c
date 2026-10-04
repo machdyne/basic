@@ -232,6 +232,11 @@ void bridge_link_test(uint32_t n) {
     bridge_puts(b);
 }
 
+void bridge_swio_socket(int socket) {
+    swio_use_socket(socket);
+    bridge_puts(socket ? "ok 1\n" : "ok 0\n");
+}
+
 void bridge_swio_timing(const uint32_t *v, int n) {
     uint32_t t[6];
     char b[100];

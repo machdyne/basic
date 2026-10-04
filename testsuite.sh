@@ -1325,6 +1325,12 @@ run_tool "bridge: swio-test (simulated CH32V003)" "ok 300 errors 0" sh -c "./sec
 run_tool "bridge: swio-id (simulated CH32V003)" "ok chip 00300500 hartinfo 002120f4" sh -c "./sechsctl -d $PTY swio-id 2>/dev/null"
 run_tool "bridge: flash a module's firmware (simulated CH32V003)" "ok written and verified" sh -c "./sechsctl -d $PTY flash ZZFW.BIN 2>/dev/null"
 head -c 5000 /dev/urandom > ZZFW.BIN
+head -c 20000 /dev/urandom > ZZFW11.BIN; printf 'xx fw=Machdyne BASIC\nmod=LS11A\n' >> ZZFW11.BIN
+run_tool "bridge: LS11 firmware through the socket (simulated CH32V005)" "ok written and verified" sh -c "./sechsctl -d $PTY -s flash ZZFW11.BIN 2>/dev/null"
+head -c 9000 /dev/urandom > ZZFW11S.BIN; printf 'xx fw=Machdyne BASIC\nmod=LS11A\n' >> ZZFW11S.BIN
+run_tool "bridge: LS11 firmware on the header's LS10 is refused" "fail the firmware is for another module" sh -c "./sechsctl -d $PTY flash ZZFW11S.BIN 2>/dev/null | cut -c1-39"
+run_tool "bridge: 20KB firmware on the header's LS10 is refused (too large)" "fail not a Machdyne BASIC firmware (or too large)" sh -c "./sechsctl -d $PTY flash ZZFW11.BIN 2>/dev/null"
+run_tool "bridge: swio-id through the socket" "ok chip 00500500" sh -c "./sechsctl -d $PTY -s swio-id 2>/dev/null | cut -c1-16"
 run_tool "bridge: an image that is not Machdyne BASIC is refused" "fail not a Machdyne BASIC firmware (or too large)" sh -c "./sechsctl -d $PTY flash ZZFW.BIN 2>/dev/null"
 run_tool "bridge: unless forced" "ok written and verified" sh -c "./sechsctl -d $PTY flash ZZFW.BIN force 2>/dev/null"
 rm -f ZZFW.BIN

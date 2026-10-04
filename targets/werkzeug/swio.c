@@ -5,6 +5,8 @@
  * Wiring, on the GPIO header's top row (female jumpers on its pins):
  *   header 1 (GPIO0)  SWIO, directly: no resistor
  *   header 3 (GPIO2)  RESETN, optional (open drain): for recovery
+ * or, for modules with SWIO on pin A (LS11): the Sechs socket's pin A
+ * (GPIO19), with nothing to wire (swio_use_socket).
  * Ground and power come from the module's own connection (for example
  * the Wolfszahn on the PMOD), or header 9 (GND) and 10 (3V3).
  *
@@ -22,9 +24,21 @@
 #include "hardware/structs/sio.h"
 #include "../../tools/sechs/ch32prog.h"
 
-#define SWIO_PIN    0
+// SWIO: GPIO header pin 1 (GPIO0), or the Sechs socket's pin A (GPIO19,
+// for modules with SWIO on pin A, such as LS11, in programming mode)
+static uint32_t swio_pin = 0, swio_mask = 1u << 0;
+#define SWIO_PIN    swio_pin
+#define SWIO_MASK   swio_mask
 #define SWIO_RST    2
-#define SWIO_MASK   (1u << SWIO_PIN)
+
+void swio_use_socket(int socket) {
+    swio_pin = socket ? 19 : 0;
+    swio_mask = 1u << swio_pin;
+}
+
+int swio_on_socket(void) {
+    return swio_pin == 19;
+}
 
 // Line mode 0 (default): driven high between bits; the chip only ever
 // drives the line during a read bit, so nothing can fight. Mode 1: released
@@ -85,6 +99,8 @@ void swio_init(void) {
 
 void swio_release(void) {
     gpio_init(SWIO_PIN);
+    if (swio_on_socket())               // the Sechs bus again: pulled up
+        gpio_set_pulls(SWIO_PIN, true, false);
     gpio_init(SWIO_RST);
 }
 

@@ -131,6 +131,12 @@ static void command(void) {
             bridge_link_test(tn);
             return;
         }
+        case 'c':       /* c 0 | c 1: the programming wire */
+            if ((p[0] == '0' || p[0] == '1') && !p[1]) {
+                bridge_swio_socket(p[0] == '1');
+                return;
+            }
+            break;
         case 's': {     /* s [A B C D E F]: the SWIO timing */
             uint32_t v[6];
             int k = 0;

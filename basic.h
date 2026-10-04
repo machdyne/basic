@@ -68,6 +68,9 @@ void hw_pin_write(uint8_t pin, uint8_t level);
 uint8_t hw_pin_read(uint8_t pin);
 int16_t hw_adc(uint8_t pin);                    /* 0-1023, -1 if none */
 void hw_led(uint8_t on);
+#ifdef HW_PROG_MODE
+void hw_prog_mode(void);    /* BOOT: restart in programming mode */
+#endif
 
 /* local I2C bus on C/D: write wn bytes, then read rn bytes (with a
  * repeated start). Returns 0, or -1 if the device does not answer. */

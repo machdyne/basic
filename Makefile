@@ -17,6 +17,8 @@ basic_fs: basic.c basic.h fs/fs.c fs/fs.h fs/test/basic_fs.c
 sechs_test: basic.c basic.h fs/fs.c fs/fs.h sechs/sechs.c sechs/sechs.h sechs/test/sechs_test.c
 	gcc -std=gnu99 -Wall -Wextra -O1 -g -fsanitize=address,undefined \
 		-o sechs_test basic.c fs/fs.c sechs/sechs.c sechs/test/sechs_test.c
+	gcc -std=gnu99 -Wall -Wextra -O1 -g -fsanitize=address,undefined \
+		-DSECHS_PROGRAM -o sechs_test_prog basic.c fs/fs.c sechs/sechs.c sechs/test/sechs_test.c
 
 # The Sechs controller for Linux, and the same tool talking to a simulated
 # module (used by the tests).
@@ -47,6 +49,8 @@ test: basic basic_fs fs_test fs_nor_test sechs_test sechsctl sechs_sim bridge_ho
 	./fs_nor_test
 	./ch32prog_test
 	./sechs_test
+	./sechs_test_prog
+	./sechs_test_prog
 	bash testsuite.sh
 
 test-quick: basic basic_fs fs_test fs_nor_test sechs_test sechsctl sechs_sim bridge_host ch32prog_test

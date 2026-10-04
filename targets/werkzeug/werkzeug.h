@@ -21,12 +21,14 @@ int usb_uart_active(void);      /* the bridge's UART mode has pins 3/4 */
 int wz_i2c(uint8_t scl, uint8_t sda, uint8_t addr, const uint8_t *w,
            uint8_t wn, uint8_t *r, uint8_t rn);  /* 0, -1 no answer */
 int wz_pins_free(uint8_t first);    /* pins first, first+1 free for the bridge */
-int wz_prog_pins_free(void);        /* header GPIO0-2 (pins 9-11) free */
+int wz_prog_pins_free(void);        /* the programming pins are free */
 
 /* swio.c: the programming wires */
 void swio_init(void);
 void swio_release(void);
 void swio_set_timing(const uint32_t *v);    /* see swio.c */
+void swio_use_socket(int socket);   /* SWIO on GPIO0, or on socket pin A */
+int swio_on_socket(void);
 void swio_get_timing(uint32_t *v);
 
 #endif

@@ -4,6 +4,7 @@ basic_fs
 fs_test
 fs_nor_test
 sechs_test
+sechs_test_prog
 sechsctl
 sechs_sim
 bridge_host
