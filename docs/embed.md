@@ -82,7 +82,11 @@ are those of `fs/fs.h`.
 - **Your own storage:** implement `hw_fopen(name, mode)` (`FS_READ`,
   `FS_WRITE`, `FS_APPEND`), `hw_fread`, `hw_fwrite`, `hw_fclose`,
   `hw_fabort` (close, discarding a file opened with `FS_WRITE`),
-  `hw_fdelete` and `hw_fdir(callback)`. `FS_WRITE` should replace a file
+  `hw_fdelete` and `hw_fdir(callback)`, which calls `callback(name, NULL)`
+  for each file. **Each returns `FS_OK` (0) or a negative `FS_ERR_*` code,
+  except `hw_fread`, which returns the bytes read (0 at the end).** In
+  particular `hw_fwrite` returns `FS_OK` once all the bytes are written,
+  not a byte count: returning the count makes every `SAVE` fail. `FS_WRITE` should replace a file
   only when it is closed, so that a failed `SAVE` keeps the old one. The
   Linux build in `basic.c` (`TARGET_LINUX`) maps them to a directory.
 - **Raw storage (F-RAM, EEPROM, NOR flash):** build with `HW_FILES_FS` and
@@ -112,6 +116,8 @@ plus the stack: the deepest paths (an expression inside a `FOR` inside a
 had to be measured (targets.md, LS10); elsewhere it does not matter.
 
 **State a system may read:** `basic_running` (1 while a program runs),
+`basic_input` (1 while a program waits at `INPUT`: a system with a prompt
+of its own shows it only when this is 0),
 `basic_prog_err` (what stopped the last program), `basic_cmd_err` (the last
 command's error), and `basic_regs[16]`, the program registers `REG 0-15`,
 which BASIC 1 calls "shared with the environment": on a Sechs module they

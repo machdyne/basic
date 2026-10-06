@@ -25,6 +25,8 @@ int basic_boot(void);              /* load BOOT.BAS; 1 if loaded */
 /* state for Sechs (read by the target) */
 extern uint8_t basic_regs[16];     /* REG 0-15: Sechs registers 0x80-0x8F */
 extern uint8_t basic_running;      /* 1 while a program runs */
+extern uint8_t basic_input;        /* 1 while a program waits at INPUT: the
+                                      next line is its answer */
 extern uint8_t basic_prog_err;     /* error that stopped the last program */
 extern uint8_t basic_cmd_err;      /* error of the last command, 0 if none */
 extern const char basic_pin_modes[];   /* "- IN OD PP AIN I2C UART NET " */
@@ -90,13 +92,16 @@ int hw_i2c(uint8_t addr, const uint8_t *w, uint8_t wn, uint8_t *r, uint8_t rn);
 #define hw_fdelete  fs_delete
 #define hw_fdir(cb) fs_dir(cb, 0)
 #else
+/* Each returns FS_OK or a negative FS_ERR_* code, except hw_fread,
+ * which returns the bytes read (0 at the end). hw_fwrite returns FS_OK
+ * once all len bytes are written: not a byte count. */
 int hw_fopen(const char *name, uint8_t mode);
 int hw_fread(uint8_t *buf, uint16_t len);       /* bytes, 0 at end */
-int hw_fwrite(const uint8_t *buf, uint16_t len);
+int hw_fwrite(const uint8_t *buf, uint16_t len);    /* FS_OK or error */
 int hw_fclose(void);
 void hw_fabort(void);                           /* discard FS_WRITE */
 int hw_fdelete(const char *name);
-int hw_fdir(fs_dir_cb cb);
+int hw_fdir(fs_dir_cb cb);                      /* cb(name, NULL) per file */
 #endif
 int hw_fformat(void);
 

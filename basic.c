@@ -124,7 +124,7 @@ static struct {
 static uint8_t gosub_sp;
 
 /* INPUT suspends the program until the next console line */
-static uint8_t awaiting_input;
+uint8_t basic_input;            /* a program waits at INPUT (basic.h) */
 static uint8_t input_var;
 static uint16_t resume_line, resume_pos;
 
@@ -1182,7 +1182,7 @@ static int statement(void) {
             input_var = *ip++;
             resume_line = line_p - program;
             resume_pos = ip - program;
-            awaiting_input = 1;
+            basic_input = 1;
             out_str("? ");
             return -1;
 
@@ -1369,7 +1369,7 @@ stop:
     basic_running = 0;
     basic_prog_err = err;
     if (err) report(err);
-    if (!awaiting_input) {
+    if (!basic_input) {
         err = E_NONE;
         file_close();       /* a program's file is closed when it stops */
         if (err) report(err);
@@ -1382,7 +1382,7 @@ static void clear(void) {
     static const uint8_t default_pins[4] = { PM_NET, PM_NET, 0, 0 };
     memset(vars, 0, sizeof(vars));
     for_sp = gosub_sp = 0;
-    awaiting_input = 0;
+    basic_input = 0;
     set_pins(default_pins);
 #if HW_PINS > 4
     for (uint8_t i = 4; i < HW_PINS; i++) {     /* pins 5 and up: unused */
@@ -1552,8 +1552,8 @@ static void process_command(char *line) {
 
 void basic_yield(uint8_t *line) {
     col[OUT_CONSOLE] = 0;   /* the user's Enter ended the line */
-    if (awaiting_input) {
-        awaiting_input = 0;
+    if (basic_input) {
+        basic_input = 0;
         /* a number, with optional spaces and sign */
         char *s = skip_spaces((char *)line);
         int16_t v = 0, neg = *s == '-';
@@ -1736,7 +1736,7 @@ int main(void) {
     puts("///");
 
     for (;;) {
-        if (!awaiting_input) printf("> ");
+        if (!basic_input) printf("> ");
         fflush(stdout);
         if (!fgets(line, sizeof(line), stdin)) break;
         basic_yield((uint8_t *)line);
