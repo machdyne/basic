@@ -57,6 +57,16 @@ $ make -C ../ls11       # ls11.bin (uses the same ch32fun checkout)
 Both modules share their firmware (`targets/ls1x`); each board's directory
 has a `board.h` with its pins, storage and features.
 
+LS10 fills its 16KB flash almost exactly, and needs **GCC 13 or newer**
+(older versions make larger code: GCC 12 is 212 bytes too large). Ubuntu
+24.04's `gcc-riscv64-unknown-elf` (13.2, used for the releases) works; with
+an older system compiler, use an [xPack](https://github.com/xpack-dev-tools/riscv-none-elf-gcc-xpack/releases)
+toolchain (no installation, measured: 14.2 and 15.2 fit):
+
+```bash
+$ make PREFIX=$HOME/xpack-riscv-none-elf-gcc-15.2.0-1/bin/riscv-none-elf
+```
+
 ### RP2040 (Werkzeug / Blaustahl)
 
 You will need [pico-sdk](https://github.com/raspberrypi/pico-sdk) (with its
