@@ -24,7 +24,7 @@ jobs:
       - name: make test
         run: make test
       - name: sechsctl (static, Linux x86-64)
-        run: gcc -std=gnu99 -O2 -static -o sechsctl-linux-x86_64 tools/sechs/sechs.c
+        run: gcc -std=gnu99 -O2 -static -o sechsctl-linux-x86_64 tools/sechs/sechs.c tools/sechs/sechsm.c
       - uses: actions/upload-artifact@v4
         with:
           name: sechsctl

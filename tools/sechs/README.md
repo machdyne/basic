@@ -1,7 +1,10 @@
 # sechsctl
 
-A [Sechs](../../docs/sechs.md) master for Linux. It
-reaches modules in one of two ways:
+A [Sechs](../../docs/sechs.md) master for Linux. The protocol itself is
+`sechsm.c` (`sechsm.h`): the master side of Sechs, independent of how the
+bus is reached, with no operating system or allocation, so other masters
+(Zeitlos's `sechs` command) use the same code. sechsctl reaches modules in
+one of two ways:
 
 - a Linux I2C bus (`/dev/i2c-N`, `-b N`), for example on a Raspberry Pi,
   with the module's pins 1 (SCL) and 2 (SDA) on the bus and pull-ups on

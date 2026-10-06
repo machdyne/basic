@@ -3,6 +3,10 @@ CFLAGS = -std=gnu99 -Wall -Wextra -O2
 basic: basic.c basic.h fs/fs.h
 	gcc $(CFLAGS) -DTARGET_LINUX -o basic basic.c
 
+# the extension interface (basic.h, BASIC_EXT) with a test table
+basic_ext: basic.c basic.h test/ext_table.c
+	gcc $(CFLAGS) -DTARGET_LINUX -DBASIC_EXT -o basic_ext basic.c test/ext_table.c
+
 # Filesystem tests run with sanitizers and a large block limit, so that
 # media up to 4MB can be tested.
 fs_test: fs/fs.c fs/fs.h fs/test/fs_test.c
@@ -22,12 +26,12 @@ sechs_test: basic.c basic.h fs/fs.c fs/fs.h sechs/sechs.c sechs/sechs.h sechs/te
 
 # The Sechs controller for Linux, and the same tool talking to a simulated
 # module (used by the tests).
-sechsctl: tools/sechs/sechs.c sechs/sechs.h
-	gcc $(CFLAGS) -o sechsctl tools/sechs/sechs.c
+sechsctl: tools/sechs/sechs.c tools/sechs/sechsm.c tools/sechs/sechsm.h sechs/sechs.h
+	gcc $(CFLAGS) -o sechsctl tools/sechs/sechs.c tools/sechs/sechsm.c
 
-sechs_sim: tools/sechs/sechs.c tools/sechs/sim.h basic.c basic.h fs/fs.c sechs/sechs.c sechs/sechs.h
+sechs_sim: tools/sechs/sechs.c tools/sechs/sechsm.c tools/sechs/sim.h basic.c basic.h fs/fs.c sechs/sechs.c sechs/sechs.h
 	gcc -std=gnu99 -Wall -Wextra -O1 -DSECHS_SIM -DHW_FILES_FS \
-		-o sechs_sim tools/sechs/sechs.c basic.c fs/fs.c sechs/sechs.c
+		-o sechs_sim tools/sechs/sechs.c tools/sechs/sechsm.c basic.c fs/fs.c sechs/sechs.c
 
 # the bridge protocol on the host, with a simulated module (for the tests)
 bridge_host: tools/sechs/test/bridge_host.c tools/sechs/bridge.c tools/sechs/bridge.h tools/sechs/sim.h basic.c fs/fs.c sechs/sechs.c
@@ -44,7 +48,7 @@ fs_nor_test: fs/test/fs_test.c fs/fs.c fs/fs.h
 	gcc -std=gnu99 -Wall -Wextra -O2 -DFS_NOR -DFS_MAX_BLOCKS=512 \
 		-o fs_nor_test fs/test/fs_test.c fs/fs.c
 
-test: basic basic_fs fs_test fs_nor_test sechs_test sechsctl sechs_sim bridge_host ch32prog_test
+test: basic basic_ext basic_fs fs_test fs_nor_test sechs_test sechsctl sechs_sim bridge_host ch32prog_test
 	./fs_test
 	./fs_nor_test
 	./ch32prog_test
@@ -53,7 +57,7 @@ test: basic basic_fs fs_test fs_nor_test sechs_test sechsctl sechs_sim bridge_ho
 	./sechs_test_prog
 	bash testsuite.sh
 
-test-quick: basic basic_fs fs_test fs_nor_test sechs_test sechsctl sechs_sim bridge_host ch32prog_test
+test-quick: basic basic_ext basic_fs fs_test fs_nor_test sechs_test sechsctl sechs_sim bridge_host ch32prog_test
 	./fs_test quick
 	./fs_nor_test quick
 	./ch32prog_test

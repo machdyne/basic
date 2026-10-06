@@ -1,6 +1,7 @@
 # build outputs
 basic
 basic_fs
+basic_ext
 fs_test
 fs_nor_test
 sechs_test

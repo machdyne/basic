@@ -119,6 +119,17 @@ I2C bus or through Werkzeug as a USB bridge; see
 [tools/sechs/README.md](tools/sechs/README.md). Hardware testing:
 [docs/hwtest.md](docs/hwtest.md).
 
+### Extending BASIC
+
+A target can add statements and functions to BASIC 1 (graphics on Zeitlos,
+for example) without touching the interpreter: build with `-DBASIC_EXT`
+and provide a table of names, argument counts and handlers. The
+interpreter tokenizes, lists, parses and checks them like its own
+keywords. [docs/embed.md](docs/embed.md) explains embedding BASIC in
+another system and writing extensions; `test/ext_table.c` is a worked
+example, tested by `make test` (`basic_ext`). Extensions are not BASIC 1:
+each target documents its own.
+
 ## Downloads
 
 Every push is built and tested on GitHub (`.github/workflows/build.yml`).
@@ -133,10 +144,11 @@ the workflow run's artifacts.
 |---|---|
 | [docs/guide.md](docs/guide.md) | getting started with Werkzeug and an LS10A (`make guide` prints it) |
 | [docs/basic1.md](docs/basic1.md) | Machdyne BASIC 1, the language |
-| [docs/targets.md](docs/targets.md) | each machine: pins, storage, start-up, LS10's Sechs binding |
+| [docs/targets.md](docs/targets.md) | each machine: pins, storage, start-up, the modules' Sechs bindings |
+| [docs/embed.md](docs/embed.md) | embedding BASIC in another system, and adding statements and functions |
 | [docs/sechs.md](docs/sechs.md) | Sechs, the six-pin module interface (specification) |
 | [docs/fs.md](docs/fs.md) | the power-loss safe filesystem |
-| [docs/ch32prog.md](docs/ch32prog.md) | programming LS10 modules from Werkzeug |
+| [docs/ch32prog.md](docs/ch32prog.md) | programming LS10 and LS11 modules from Werkzeug |
 | [docs/hwtest.md](docs/hwtest.md) | hardware test plan |
 | [docs/plan.md](docs/plan.md) | development plan and history |
 

@@ -41,12 +41,13 @@ int hw_break(void);                /* 1 if the user pressed Ctrl-C */
 void hw_delay_ms(uint16_t ms);     /* ms <= 1000 */
 
 
-/* Sechs pins 1-4 (A, B, C, D) and their modes (PINS) */
 /* One line of text: LOAD reads into it. A target with little RAM may use
  * it as its console line buffer too (LS10 does): LOAD takes its file name
  * from the console line before it reads into the buffer. */
 #define BASIC_LINE 128
 extern char basic_line[BASIC_LINE];
+
+/* ---- pins: Sechs pins 1-4 (A, B, C, D) and their modes (PINS) ---- */
 
 /* Pins a program can use: 1-4 in BASIC 1; a target with more pins defines
  * HW_PINS and gets the PIN statement (an extension, not BASIC 1). */
@@ -98,5 +99,42 @@ int hw_fdelete(const char *name);
 int hw_fdir(fs_dir_cb cb);
 #endif
 int hw_fformat(void);
+
+/* ---- Extensions (BASIC_EXT) ----
+ *
+ * Statements and functions a target adds to BASIC 1 (graphics on Zeitlos,
+ * for example), documented by the target. The target provides basic_ext[]
+ * and basic_ext_count.
+ *
+ * A name is two or more upper-case letters or digits. Keywords match by
+ * prefix (spaces are optional in BASIC), and the longest match wins, so a
+ * name may begin with a built-in keyword. The interpreter parses the
+ * arguments, all numeric expressions:
+ *   a statement:  NAME            NAME a, b, ...
+ *   a function:   NAME            if it takes none (max_args 0)
+ *                 NAME(a, b, ...) otherwise (min_args at least 1)
+ * A wrong number of arguments is a SYNTAX ERROR. run() gets them in argv;
+ * a function returns its value. On a problem run() sets *error to one of
+ * the BASIC_E_* codes, and the line stops with that message. */
+#ifdef BASIC_EXT
+#define BASIC_EXT_ARGS  6   /* the most arguments an extension can take */
+
+typedef struct {
+    const char *name;
+    uint8_t function;               /* 1: a function, used in expressions */
+    uint8_t min_args, max_args;
+    int16_t (*run)(uint8_t argc, const int16_t *argv, uint8_t *error);
+} basic_ext_t;
+
+extern const basic_ext_t basic_ext[];
+extern const uint8_t basic_ext_count;   /* at most 64 */
+#endif
+
+/* errors an extension may report (the same messages as BASIC 1's) */
+#define BASIC_E_SYNTAX       1   /* SYNTAX ERROR */
+#define BASIC_E_IO          11   /* I/O ERROR */
+#define BASIC_E_UNSUPPORTED 14   /* NOT SUPPORTED */
+/*      BASIC_E_BREAK       15      BREAK (above) */
+#define BASIC_E_RANGE       20   /* OUT OF RANGE */
 
 #endif /* BASIC_H */

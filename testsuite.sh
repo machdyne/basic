@@ -37,7 +37,7 @@ run_test() {
     
     # Run the program and capture output
     # Remove prompts (>), banner (///), carriage returns, and empty lines
-    actual=$(printf "%s\n" "$program" | ./basic 2>&1 | sed -E 's/^(> )+//' | grep -v "^///" | tr -d '\r' | grep -v '^$')
+    actual=$(printf "%s\n" "$program" | ${BASIC_BIN:-./basic} 2>&1 | sed -E 's/^(> )+//' | grep -v "^///" | tr -d '\r' | grep -v '^$')
     
     # Compare output
     if [ "$actual" = "$expected" ]; then
@@ -1094,6 +1094,83 @@ rm -f ZZFRAM.IMG
 
 
 # ============================================================
+section "Extensions (BASIC_EXT; test table test/ext_table.c)"
+BASIC_BIN=./basic_ext
+
+run_test "Extension functions: with arguments, and with none" \
+    '10 PRINT DOUBLE(21); " "; SUM(1, 2, 3); " "; SEVEN + 1
+RUN' \
+    "42 6 8"
+
+run_test "Extension statements: with an argument, and without" \
+    '10 TOGGLE 5: PRINT LAST: TOGGLE: PRINT LAST
+RUN' \
+    "105
+0"
+
+run_test "Longest match: ORBIT is not OR BIT; OR still works" \
+    '10 orbit: PRINT LAST
+20 IF 0 OR 1 THEN PRINT "OR"
+RUN' \
+    "999
+OR"
+
+run_test "An extension's error stops the line with its message" \
+    '10 PLOT 400, 1
+RUN' \
+    "OUT OF RANGE IN 10"
+
+run_test "Wrong number of arguments: SYNTAX ERROR" \
+    '10 PLOT 1
+20 PRINT DOUBLE(1, 2)
+RUN
+NEW
+10 PRINT SUM(1, 2, 3, 4, 5, 6, 7)
+RUN' \
+    "SYNTAX ERROR IN 10
+SYNTAX ERROR IN 10"
+
+run_test "A function that takes no arguments takes no parentheses" \
+    '10 X = SEVEN(1)
+RUN' \
+    "SYNTAX ERROR IN 10"
+
+run_test "NOT SUPPORTED from an extension" \
+    '10 FAIL
+RUN' \
+    "NOT SUPPORTED IN 10"
+
+run_test "Extensions in FOR and IF" \
+    '10 FOR I = 1 TO 3: TOGGLE I: NEXT
+20 IF LAST = 103 THEN PRINT "OK"
+RUN' \
+    "OK"
+
+run_test "LIST: extensions in canonical form" \
+    '10 plot 1,2:toggle
+20 print seven+double(2)
+LIST' \
+    "10 PLOT 1, 2: TOGGLE
+20 PRINT SEVEN + DOUBLE(2)"
+
+rm -f ZZEXT.BAS
+run_test "SAVE and LOAD keep extensions" \
+    '10 PLOT 1, 2: TOGGLE 3
+SAVE ZZEXT
+NEW
+LOAD ZZEXT
+LIST' \
+    "10 PLOT 1, 2: TOGGLE 3"
+rm -f ZZEXT.BAS
+
+run_test "HELP lists the extensions" \
+    'HELP' \
+    "RUN LIST NEW SAVE LOAD DIR DEL TYPE FORMAT HELP 
+ADC AND APPEND AS CLOSE ELSE END EOF FOR GOSUB GOTO I2CR I2C IF INPUT IN LED LET MOD NEXT NOT OPEN OR OUTPUT OUT PINS PRINT REG REM RETURN SLEEP STEP THEN TO WAIT 
+DOUBLE SUM SEVEN LAST TOGGLE PLOT ORBIT FAIL "
+
+BASIC_BIN=./basic
+
 section "Machdyne BASIC 1 (docs/basic1.md)"
 # ============================================================
 
@@ -1223,7 +1300,7 @@ rm -f ZZLAYOUT
 section "Sechs tool (simulated module)"
 # ============================================================
 
-gcc -std=gnu99 -Wall -O1 -DSECHS_SIM -DHW_FILES_FS -o sechs_sim tools/sechs/sechs.c basic.c fs/fs.c sechs/sechs.c
+gcc -std=gnu99 -Wall -O1 -DSECHS_SIM -DHW_FILES_FS -o sechs_sim tools/sechs/sechs.c tools/sechs/sechsm.c basic.c fs/fs.c sechs/sechs.c
 rm -f ZZSIM.IMG
 
 run_tool() {
@@ -1284,7 +1361,7 @@ rm -f ZZSIM.IMG ZZSEND.TXT
 section "Sechs tool through a USB bridge (simulated)"
 # ============================================================
 
-gcc -std=gnu99 -Wall -O1 -o sechsctl tools/sechs/sechs.c
+gcc -std=gnu99 -Wall -O1 -o sechsctl tools/sechs/sechs.c tools/sechs/sechsm.c
 gcc -std=gnu99 -Wall -O1 -DSECHS_SIM -DHW_FILES_FS -o bridge_host tools/sechs/test/bridge_host.c tools/sechs/bridge.c tools/sechs/ch32prog.c basic.c fs/fs.c sechs/sechs.c
 rm -f ZZSIM.IMG
 ./bridge_host > ZZPTY.TXT &

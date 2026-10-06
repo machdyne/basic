@@ -47,6 +47,7 @@
 #include <unistd.h>
 #include <time.h>
 #include "../../sechs/sechs.h"
+#include "sechsm.h"
 
 /* ---- transport ------------------------------------------------------------ */
 
@@ -332,126 +333,89 @@ static void bus_idle(void) {
 #include "sim.h"
 #endif
 
-/* ---- protocol ---------------------------------------------------------------- */
+/* ---- protocol: tools/sechs/sechsm.c, over this program's bus -------------- */
 
-static int reg_write(uint8_t addr, uint8_t reg, const uint8_t *d, int n) {
-    uint8_t b[64];
-    b[0] = reg;
-    memcpy(b + 1, d, n);
-    return bus_write(addr, b, n + 1);
+static int t_write(void *c, uint8_t addr, const uint8_t *d, int n) {
+    (void)c;
+    return bus_write(addr, d, n);
 }
 
-static int reg1(uint8_t addr, uint8_t reg) {
-    uint8_t v;
-    return bus_read(addr, reg, &v, 1) ? -1 : v;
+static int t_read(void *c, uint8_t addr, uint8_t reg, uint8_t *d, int n) {
+    (void)c;
+    return bus_read(addr, reg, d, n);
 }
 
-static int is_module(uint8_t addr) {
-    uint8_t s[2];
-    return !bus_read(addr, SR_SIG0, s, 2) && s[0] == 'S' && s[1] == '6';
+static void t_idle(void *c) {
+    (void)c;
+    bus_idle();
 }
 
-static void print_status(int s) {
-    static const char *bits[] = {
-        "boot", "halted", "running", "console", "networked", "fault",
-        "degraded"
-    };
-    for (int i = 0; i < 7; i++) if (s & (1 << i)) printf(" %s", bits[i]);
-}
-
-static int info(uint8_t addr) {
-    uint8_t r[7];
-    char text[128];
-    int n = 0;
-    if (bus_read(addr, SR_SIG0, r, 7) || r[0] != 'S' || r[1] != '6') {
-        fprintf(stderr, "no Sechs module at 0x%02x\n", addr);
-        return 1;
-    }
-    printf("address 0x%02x\nversion %d.%d\ncaps    0x%02x\nstatus ",
-        addr, r[2] >> 4, r[2] & 15, r[3]);
-    print_status(r[4]);
-    printf("\nok      0x%02x\nfault   %d\n", r[5], r[6]);
-    /* INFO: one read (64 bytes, the most a bridge reads at once), up to
-     * its terminating zero */
-    if (bus_read(addr, SR_INFO, (uint8_t *)text, 64)) n = 0;
-    else while (n < (int)sizeof(text) - 1 && text[n]) n++;
-    fputs(text, stdout);
-    return 0;
-}
-
-static int scan(void) {
-    int found = 0;
-    for (int a = 0x08; a <= 0x77; a++) {
-        if (!is_module(a)) continue;
-        int s = reg1(a, SR_STATUS);
-        printf("0x%02x", a);
-        print_status(s);
-        printf("\n");
-        found++;
-    }
-    if (!found) printf("no modules found\n");
-    return 0;
-}
-
-/* everything the console has printed so far */
-static int drain(uint8_t addr, FILE *out) {
-    int total = 0, n;
-    while ((n = reg1(addr, SR_COUT)) > 0) {
-        uint8_t b[64];
-        if (n > 64) n = 64;
-        if (bus_read(addr, SR_CDATA, b, n)) return -1;
-        for (int i = 0; i < n; i++) if (b[i] != '\r') fputc(b[i], out);
-        total += n;
-    }
-    fflush(out);
-    return total;
-}
-
-/* type text into the console, never more than the module can take */
-static int type(uint8_t addr, const char *s, int len, FILE *out) {
-    while (len > 0) {
-        int room = reg1(addr, SR_CIN);
-        if (room < 0) return -1;
-        int n = room < len ? room : len;
-        if (n > 32) n = 32;
-        if (n && reg_write(addr, SR_CDATA, (const uint8_t *)s, n)) return -1;
-        s += n;
-        len -= n;
-        bus_idle();
-        drain(addr, out);
-    }
-    return 0;
-}
-
-/* wait until the module has printed nothing for 300 ms (a module may
- * take a moment to start answering: a LOAD, a program that waits) */
 static long now_ms(void) {
     struct timespec t;
     clock_gettime(CLOCK_MONOTONIC, &t);
     return t.tv_sec * 1000L + t.tv_nsec / 1000000;
 }
 
-static void settle(uint8_t addr, FILE *out) {
-    long quiet_since = now_ms();
-    while (now_ms() - quiet_since < 300) {
-        bus_idle();
-        if (drain(addr, out) > 0) quiet_since = now_ms();
-    }
+static long t_ms(void *c) {
+    (void)c;
+    return now_ms();
 }
 
-static int send(uint8_t addr, FILE *in) {
+static void t_out(void *c, char ch) {
+    (void)c;
+    fputc(ch, stdout);
+    if (ch == '\n') fflush(stdout);
+}
+
+static const sm_bus B = { t_write, t_read, t_idle, t_ms, t_out, NULL };
+
+static void print_status(int s) {
+    for (int i = 0; i < 7; i++) if (s & (1 << i)) printf(" %s", sm_status_names[i]);
+}
+
+static int info(uint8_t addr) {
+    sm_info_t i;
+    if (sm_info(&B, addr, &i)) {
+        fprintf(stderr, "no Sechs module at 0x%02x\n", addr);
+        return 1;
+    }
+    printf("address 0x%02x\nversion %d.%d\ncaps    0x%02x\nstatus ",
+        addr, i.version >> 4, i.version & 15, i.caps);
+    print_status(i.status);
+    printf("\nok      0x%02x\nfault   %d\n", i.ok, i.fault);
+    fputs(i.info, stdout);
+    return 0;
+}
+
+static int scan(void) {
+    uint8_t found[112];
+    int n = sm_scan(&B, found, sizeof(found));
+    for (int k = 0; k < n; k++) {
+        printf("0x%02x", found[k]);
+        print_status(sm_reg(&B, found[k], SR_STATUS));
+        printf("\n");
+    }
+    if (!n) printf("no modules found\n");
+    return 0;
+}
+
+/* lines from in, typed into the console one at a time */
+static int lines(uint8_t addr, FILE *in) {
     char line[256];
     while (fgets(line, sizeof(line), in)) {
-        size_t n = strcspn(line, "\r\n");
-        line[n++] = '\r';
-        if (type(addr, line, n, stdout)) {
+        if (sm_line(&B, addr, line, strcspn(line, "\r\n"))) {
             fprintf(stderr, "the module at 0x%02x stopped answering\n", addr);
             return 2;
         }
-        settle(addr, stdout);
+        fflush(stdout);
     }
-    int ok = reg1(addr, SR_OK);
-    if (ok < 0 || !(ok & 0x10)) {
+    return 0;
+}
+
+static int send(uint8_t addr, FILE *in) {
+    int r = lines(addr, in);
+    if (r) return r;
+    if (sm_last_ok(&B, addr) != 1) {
         fprintf(stderr, "the last command failed\n");
         return 1;
     }
@@ -459,18 +423,8 @@ static int send(uint8_t addr, FILE *in) {
 }
 
 static int console(uint8_t addr) {
-    char line[256];
     fprintf(stderr, "sechsctl " __DATE__ " " __TIME__ "; console on 0x%02x; end with Ctrl-D\n", addr);
-    while (fgets(line, sizeof(line), stdin)) {
-        size_t n = strcspn(line, "\r\n");
-        line[n++] = '\r';
-        if (type(addr, line, n, stdout)) {
-            fprintf(stderr, "the module at 0x%02x stopped answering\n", addr);
-            return 2;
-        }
-        settle(addr, stdout);
-    }
-    return 0;
+    return lines(addr, stdin);
 }
 
 static long num(const char *s) {
@@ -533,17 +487,13 @@ int main(int argc, char **argv) {
     uint8_t addr = num(argv[i++]);
 
     if (!strcmp(cmd, "info")) return info(addr);
-    if (!strcmp(cmd, "halt") || !strcmp(cmd, "run") || !strcmp(cmd, "reset")) {
-        uint8_t c = cmd[0] == 'h' ? CMD_HALT : cmd[1] == 'u' ? CMD_RUN : CMD_RESET;
-        return reg_write(addr, SR_CONTROL, &c, 1) ? 1 : 0;
-    }
-    if (!strcmp(cmd, "program")) {
-        uint8_t caps = 0, c = CMD_PROGRAM;
-        if (bus_read(addr, SR_CAPS, &caps, 1) || !(caps & CAP_PROGRAM)) {
-            fprintf(stderr, "the module at 0x%02x has no programming mode\n", addr);
-            return 1;
-        }
-        return reg_write(addr, SR_CONTROL, &c, 1) ? 1 : 0;
+    if (!strcmp(cmd, "halt") || !strcmp(cmd, "run") || !strcmp(cmd, "reset") ||
+        !strcmp(cmd, "program")) {
+        uint8_t c = cmd[0] == 'h' ? CMD_HALT : cmd[0] == 'p' ? CMD_PROGRAM :
+            cmd[1] == 'u' ? CMD_RUN : CMD_RESET;
+        int r = sm_control(&B, addr, c);
+        if (r == -2) fprintf(stderr, "the module at 0x%02x has no programming mode\n", addr);
+        return r ? 1 : 0;
     }
     if (!strcmp(cmd, "addr") && i < argc) {
         long n = num(argv[i]);
@@ -551,8 +501,7 @@ int main(int argc, char **argv) {
             fprintf(stderr, "addresses are 0x08-0x77\n");
             return 2;
         }
-        uint8_t b[2] = { (uint8_t)n, (uint8_t)~n };
-        if (reg_write(addr, SR_ADDR, b, 2) || !is_module(n)) {
+        if (sm_set_address(&B, addr, n)) {
             fprintf(stderr, "address not changed\n");
             return 1;
         }
@@ -563,9 +512,9 @@ int main(int argc, char **argv) {
         if (n < 0 || n > 15) return usage();
         if (i < argc) {
             uint8_t v = num(argv[i]);
-            return reg_write(addr, SR_REG + n, &v, 1) ? 1 : 0;
+            return sm_reg_write(&B, addr, SR_REG + n, &v, 1) ? 1 : 0;
         }
-        int v = reg1(addr, SR_REG + n);
+        int v = sm_reg(&B, addr, SR_REG + n);
         if (v < 0) return 1;
         printf("%d\n", v);
         return 0;

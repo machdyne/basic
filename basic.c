@@ -38,6 +38,9 @@ enum {
     /* no longer used: TOK_PEEK, TOK_POKE, TOK_STORE, TOK_STORED */
 };
 
+/* extensions (BASIC_EXT, basic.h): tokens TOK_EXT + their index */
+#define TOK_EXT 0xC0
+
 /* Errors */
 enum {
     E_NONE = 0, E_SYNTAX, E_LINE_TOO_LONG, E_NUMBER, E_UNDEF_LINE,
@@ -46,6 +49,11 @@ enum {
     E_NEXT, E_RETURN, E_NESTING, E_PIN, E_RANGE, E_FILE_NUM, E_FILE_OPEN,
     E_FILE_NOT_OPEN, E_EOF, E_I2C, E_BAD_PINS, E_BUS
 };
+
+/* the codes basic.h gives extensions must be these */
+typedef char check_ext_errors[(E_SYNTAX == BASIC_E_SYNTAX && E_IO == BASIC_E_IO &&
+    E_UNSUPPORTED == BASIC_E_UNSUPPORTED && E_BREAK == BASIC_E_BREAK &&
+    E_RANGE == BASIC_E_RANGE && TOK_PIN < TOK_EXT) ? 1 : -1];
 
 /* error messages in order, separated by NULs (no pointer table: flash
  * is scarce on small targets) */
@@ -302,10 +310,24 @@ static int8_t find_word(const char *k, const char *s, uint8_t *len) {
     return -1;
 }
 
-/* Keyword at s: its token, with its length in *len; 0 if none. */
+/* Keyword at s: its token, with its length in *len; 0 if none. An
+ * extension's name is taken if it matches more of s than a built-in
+ * keyword does. */
 static uint8_t find_keyword(const char *s, uint8_t *len) {
     int8_t i = find_word(kw_names, s, len);
-    return i < 0 ? 0 : kw_toks[i];
+    uint8_t t = i < 0 ? 0 : kw_toks[i];
+#ifdef BASIC_EXT
+    for (uint8_t e = 0; e < basic_ext_count; e++) {
+        const char *n = basic_ext[e].name;
+        uint8_t k = 0;
+        while (n[k] && upper(s[k]) == n[k]) k++;
+        if (!n[k] && (!t || k > *len)) {
+            t = TOK_EXT + e;
+            *len = k;
+        }
+    }
+#endif
+    return t;
 }
 
 /* Tokenize src into out (MAX_TOK bytes). Returns the length or 0 with
@@ -490,6 +512,12 @@ static void out_word(const char *k, uint8_t n) {
 
 /* Print the keyword for tok; 0 if tok is not a keyword. */
 static uint8_t out_keyword(uint8_t tok) {
+#ifdef BASIC_EXT
+    if (tok >= TOK_EXT && tok < TOK_EXT + basic_ext_count) {
+        out_str(basic_ext[tok - TOK_EXT].name);
+        return 1;
+    }
+#endif
     for (uint8_t i = 0; i < sizeof(kw_toks); i++) {
         if (kw_toks[i] == tok) {
             out_word(kw_names, i);
@@ -501,6 +529,10 @@ static uint8_t out_keyword(uint8_t tok) {
 
 
 static int is_function(uint8_t t) {
+#ifdef BASIC_EXT
+    if (t >= TOK_EXT && t < TOK_EXT + basic_ext_count)
+        return basic_ext[t - TOK_EXT].function && basic_ext[t - TOK_EXT].max_args;
+#endif
     return t == TOK_IN || t == TOK_ADC || t == TOK_EOF ||
         t == TOK_I2CR || t == TOK_REG;
 }
@@ -746,6 +778,41 @@ static uint8_t i2c_ready(void) {
     return !err;
 }
 
+#ifdef BASIC_EXT
+static int stmt_end(void);
+
+/* Call the extension of token t: parse its arguments (in parentheses for
+ * a function that takes any, comma-separated for a statement), check
+ * their number, run it. Returns a function's value. */
+static int16_t ext_call(uint8_t t) {
+    const basic_ext_t *x = &basic_ext[t - TOK_EXT];
+    int16_t a[BASIC_EXT_ARGS];
+    uint8_t n = 0, e = 0;
+    if (x->function) {
+        if (x->max_args) n = args(a, BASIC_EXT_ARGS);
+    } else if (!stmt_end()) {
+        for (;;) {
+            int16_t v = expr();
+            if (n < BASIC_EXT_ARGS) a[n] = v;
+            n++;
+            if (err || *ip != TOK_COMMA) break;
+            ip++;
+        }
+    }
+    if (err) return 0;
+    if (n < x->min_args || n > x->max_args) {
+        err = E_SYNTAX;
+        return 0;
+    }
+    int16_t v = x->run(n, a, &e);
+    if (e) err = e;
+    return v;
+}
+
+#define IS_EXT(t, fn) ((t) >= TOK_EXT && (t) < TOK_EXT + basic_ext_count && \
+                       basic_ext[(t) - TOK_EXT].function == (fn))
+#endif
+
 static int16_t factor(void) {
     int16_t v = 0, a[2];
     int8_t p = 0;
@@ -802,6 +869,12 @@ static int16_t factor(void) {
             else v = basic_regs[a[0]];
             break;
         default:
+#ifdef BASIC_EXT
+            if (IS_EXT(t, 1)) {
+                v = ext_call(t);
+                break;
+            }
+#endif
             ip--;
             err = E_SYNTAX;
     }
@@ -1260,6 +1333,12 @@ static int statement(void) {
             break;
 
         default:
+#ifdef BASIC_EXT
+            if (IS_EXT(tok, 0)) {
+                ext_call(tok);
+                break;
+            }
+#endif
             ip--;
             err = E_SYNTAX;
     }
@@ -1452,6 +1531,13 @@ static void process_command(char *line) {
 #ifndef NO_HELP
                 help(cmd_names);
                 help(kw_names);
+#ifdef BASIC_EXT
+                for (uint8_t e = 0; e < basic_ext_count; e++) {
+                    out_str(basic_ext[e].name);
+                    out_char(' ');
+                }
+                out_nl();
+#endif
 #endif
                 break;
         }
