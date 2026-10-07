@@ -964,9 +964,11 @@ static int16_t expr(void) {
 /* ================= TIME ================= */
 
 /* Wait in short steps so that Ctrl-C (and later Sechs HALT) is seen. */
+/* WAIT and SLEEP, in pieces of BASIC_WAIT_PIECE ms with a break check
+ * after each (basic.h) */
 static void wait_ms(int32_t ms) {
     while (ms > 0 && !err) {
-        uint16_t n = ms > 100 ? 100 : (uint16_t)ms;
+        uint16_t n = ms > BASIC_WAIT_PIECE ? BASIC_WAIT_PIECE : (uint16_t)ms;
         hw_delay_ms(n);
         ms -= n;
         if (hw_break()) err = E_BREAK;

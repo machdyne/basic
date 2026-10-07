@@ -56,7 +56,7 @@ program, as BASIC 1 requires.
 |---|---|---|
 | `void hw_putc(char c)` | console output | (required) |
 | `int hw_break(void)` | 1 if the user asked to stop (Ctrl-C, Esc) | return 0 |
-| `void hw_delay_ms(uint16_t ms)` | wait `ms` (at most 1000) milliseconds | (required) |
+| `void hw_delay_ms(uint16_t ms)` | wait `ms` (at most `BASIC_WAIT_PIECE`, 100) milliseconds | (required) |
 | `int hw_pin_mode(pin, mode)` | set pin 1..`HW_PINS` to a `PM_*` mode (`PINS`, `PIN`); 0 if done | 0 for `PM_NONE`, `HW_ERR_UNSUPPORTED` for the rest |
 | `void hw_pin_write(pin, level)` | `OUT` | (never called if `hw_pin_mode` refuses) |
 | `uint8_t hw_pin_read(pin)` | `IN()` | " |
@@ -107,6 +107,7 @@ so a program cannot reach anything else.
 | `BASIC_EXT` | off | extensions (section 4) |
 | `HW_PROG_MODE` | off | the `BOOT` command, calling `hw_prog_mode()` |
 | `NO_HELP` | off | leaves out `HELP` (to save space) |
+| `BASIC_WAIT_PIECE` | 100 | `WAIT` and `SLEEP` wait in pieces of this many ms, with `hw_break()` after each. Larger only if `hw_delay_ms()` returns early on a break itself (a virtual module at high speed) |
 | `BASIC_PROFILE` | off | `basic_prog_max` and `basic_pins`, set at start: an interpreter built with the largest `MAX_PROG` and `HW_PINS` plays a smaller machine exactly (Zeitlos's LS99 playing an LS10); `make test` compares it with the real builds |
 | `TARGET_LINUX` | off | the Linux build, with its own `main` (in `basic.c`); with `BASIC_PROFILE`, it plays `$BASIC_PROFILE` (`LS10`, `LS11`) |
 

@@ -53,7 +53,17 @@ void hw_putc(char c);
 int hw_break(void);                /* 1 if the user pressed Ctrl-C */
 
 /* time */
-void hw_delay_ms(uint16_t ms);     /* ms <= 1000 */
+void hw_delay_ms(uint16_t ms);     /* ms <= BASIC_WAIT_PIECE */
+
+/* WAIT and SLEEP call hw_delay_ms() in pieces of this many ms, and
+ * hw_break() after each: 100, so a real module notices Ctrl-C or HALT
+ * within a tenth of a second. A system whose hw_delay_ms() returns early
+ * on a break by itself may wait in longer pieces: a virtual module at
+ * x3600 (Zeitlos's LS99) spent its CPU on 36,000 pieces a virtual hour.
+ * At most 65535. */
+#ifndef BASIC_WAIT_PIECE
+#define BASIC_WAIT_PIECE 100
+#endif
 
 
 /* One line of text: LOAD reads into it. A target with little RAM may use
