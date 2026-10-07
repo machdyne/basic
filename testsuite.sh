@@ -1171,6 +1171,39 @@ DOUBLE SUM SEVEN LAST TOGGLE PLOT ORBIT FAIL "
 
 BASIC_BIN=./basic
 
+section "Profiles (BASIC_PROFILE): playing LS10 and LS11 exactly"
+# One interpreter built large, told at start which machine to play, must
+# behave exactly like that machine's own build: compared output for output.
+gcc -std=gnu99 -Wall -O1 -DTARGET_LINUX -DBASIC_PROFILE -DHW_PINS=7 -DMAX_PROG=32768 -o basic_profile basic.c
+gcc -std=gnu99 -Wall -O1 -DTARGET_LINUX -o basic_ls10 basic.c
+gcc -std=gnu99 -Wall -O1 -DTARGET_LINUX -DHW_PINS=7 -DMAX_PROG=4096 -o basic_ls11 basic.c
+profile_big=$(for i in $(seq 1 119); do echo "$((i * 10)) PRINT \"XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\""; done; echo RUN)
+pass() { echo -e "${GREEN}✓${NC} $1"; PASSED=$((PASSED + 1)); }
+fail() { echo -e "${RED}✗${NC} $1"; echo "  Expected: $2"; echo "  Got:      $3"; FAILED=$((FAILED + 1)); }
+compare_profile() {
+    local name="$1" prog="$2" a b
+    for m in LS10 LS11; do
+        a=$(printf "%s\n" "$prog" | BASIC_PROFILE=$m ./basic_profile 2>&1)
+        if [ $m = LS10 ]; then b=$(printf "%s\n" "$prog" | ./basic_ls10 2>&1)
+        else b=$(printf "%s\n" "$prog" | ./basic_ls11 2>&1); fi
+        if [ "$a" = "$b" ]; then pass "$name as $m"; else fail "$name as $m" "$b" "$a"; fi
+    done
+}
+compare_profile "PIN on an extra pin" "10 PIN 5, OD: OUT 5, 0: PRINT IN(5)
+LIST
+RUN"
+compare_profile "PIN listed" "10 PIN 6,od
+LIST"
+compare_profile "HELP" "HELP"
+compare_profile "A program past 1KB" "$profile_big"
+compare_profile "Pins 1-4" "10 PINS -, -, PP, -
+20 OUT 3, 1
+30 PRINT IN(3)
+RUN"
+compare_profile "OUT on pin 5" "10 OUT 5, 1
+RUN"
+rm -f basic_profile basic_ls10 basic_ls11
+
 section "Machdyne BASIC 1 (docs/basic1.md)"
 # ============================================================
 

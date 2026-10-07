@@ -107,7 +107,8 @@ so a program cannot reach anything else.
 | `BASIC_EXT` | off | extensions (section 4) |
 | `HW_PROG_MODE` | off | the `BOOT` command, calling `hw_prog_mode()` |
 | `NO_HELP` | off | leaves out `HELP` (to save space) |
-| `TARGET_LINUX` | off | the Linux build, with its own `main` (in `basic.c`) |
+| `BASIC_PROFILE` | off | `basic_prog_max` and `basic_pins`, set at start: an interpreter built with the largest `MAX_PROG` and `HW_PINS` plays a smaller machine exactly (Zeitlos's LS99 playing an LS10); `make test` compares it with the real builds |
+| `TARGET_LINUX` | off | the Linux build, with its own `main` (in `basic.c`); with `BASIC_PROFILE`, it plays `$BASIC_PROFILE` (`LS10`, `LS11`) |
 
 **Size.** Compiled for RV32IM with `-Os`, the interpreter is about 14.5 KB
 of code with extensions on. Its RAM is `MAX_PROG` plus about 330 bytes,

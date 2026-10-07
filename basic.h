@@ -27,6 +27,19 @@ extern uint8_t basic_regs[16];     /* REG 0-15: Sechs registers 0x80-0x8F */
 extern uint8_t basic_running;      /* 1 while a program runs */
 extern uint8_t basic_input;        /* 1 while a program waits at INPUT: the
                                       next line is its answer */
+
+/* BASIC_PROFILE: limits a system sets at start, for an interpreter that
+ * plays a smaller machine (a virtual LS10 on a bigger one). Built with
+ * the largest MAX_PROG and HW_PINS it will play; then
+ *   basic_prog_max  the program area allowed (at most MAX_PROG): past it,
+ *                   NO MEMORY, as on the machine played
+ *   basic_pins      the pins there are (at most HW_PINS): with 4, the PIN
+ *                   statement does not exist (a SYNTAX ERROR, not HELP's)
+ * Off by default: a real module's firmware has neither. */
+#ifdef BASIC_PROFILE
+extern uint16_t basic_prog_max;
+extern uint8_t basic_pins;
+#endif
 extern uint8_t basic_prog_err;     /* error that stopped the last program */
 extern uint8_t basic_cmd_err;      /* error of the last command, 0 if none */
 extern const char basic_pin_modes[];   /* "- IN OD PP AIN I2C UART NET " */

@@ -100,6 +100,15 @@ static const char cmd_names[] = "RUN LIST NEW SAVE LOAD DIR DEL TYPE FORMAT HELP
 const char basic_pin_modes[] = "- IN OD PP AIN I2C UART NET ";
 
 static uint8_t program[MAX_PROG];
+#ifdef BASIC_PROFILE
+uint16_t basic_prog_max = MAX_PROG;
+uint8_t basic_pins = HW_PINS;
+#define PROG_MAX basic_prog_max
+#define PINS_MAX basic_pins
+#else
+#define PROG_MAX MAX_PROG
+#define PINS_MAX HW_PINS
+#endif
 static uint16_t prog_len;
 static int16_t vars[NUM_VARS];
 
@@ -327,6 +336,9 @@ static uint8_t find_keyword(const char *s, uint8_t *len) {
         }
     }
 #endif
+#if defined(BASIC_PROFILE) && HW_PINS > 4
+    if (t == TOK_PIN && basic_pins <= 4) t = 0;     /* no PIN on this machine */
+#endif
     return t;
 }
 
@@ -454,7 +466,7 @@ static int tokenize(char *src, uint8_t *out) {
                 src = skip_spaces(src);
                 while (is_digit(*src) && n < 100) n = n * 10 + (*src++ - '0');
                 src = skip_spaces(src);
-                if (n < 5 || n > HW_PINS) {
+                if (n < 5 || n > PINS_MAX) {
                     err = E_RANGE;
                     return 0;
                 }
@@ -630,7 +642,7 @@ static void delete_line(uint16_t ln) {
 static void insert_line(uint16_t ln, uint8_t *buf, int len) {
     uint8_t *p = program;
 
-    if (prog_len + 3 + len > MAX_PROG) {
+    if (prog_len + 3 + len > PROG_MAX) {
         err = E_MEMORY;
         return;
     }
@@ -766,7 +778,7 @@ static uint8_t args(int16_t *a, uint8_t max) {
 }
 
 static int8_t pin_arg(int16_t p) {
-    if (p < 1 || p > HW_PINS) {
+    if (p < 1 || p > PINS_MAX) {
         err = E_RANGE;
         return -1;
     }
@@ -1476,6 +1488,19 @@ static void cmd_format(char *arg) {
 
 /* print a list of words */
 static void help(const char *k) {
+#if defined(BASIC_PROFILE) && HW_PINS > 4
+    if (k == kw_names && basic_pins <= 4) {     /* the keywords, but PIN */
+        for (const char *p = k; *p; ) {
+            const char *e = p;
+            while (*e != ' ') e++;
+            if (e - p != 3 || p[0] != 'P' || p[1] != 'I' || p[2] != 'N')
+                while (p <= e) out_char(*p++);
+            p = e + 1;
+        }
+        out_nl();
+        return;
+    }
+#endif
     out_str(k);
     out_nl();
 }
@@ -1732,6 +1757,17 @@ int hw_fformat(void) {
 int main(void) {
     char line[256];
 
+#ifdef BASIC_PROFILE
+    /* the machine to play, for the tests: BASIC_PROFILE=LS10 or LS11 */
+    const char *prof = getenv("BASIC_PROFILE");
+    if (prof && !strcmp(prof, "LS10")) {
+        basic_prog_max = 1024;
+        basic_pins = 4;
+    } else if (prof && !strcmp(prof, "LS11")) {
+        basic_prog_max = 4096;
+        basic_pins = 7;
+    }
+#endif
     signal(SIGINT, on_sigint);
     puts("///");
 
